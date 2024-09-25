@@ -1,8 +1,12 @@
 {
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/(public|private|keys)/:path*",
       "destination": "/api"
+    },
+    {
+      "source": "/",
+      "destination": "https://securelay.github.io/"
     }
   ]
 }
