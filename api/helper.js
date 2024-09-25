@@ -1,28 +1,22 @@
 import Crypto from 'node:crypto';
-import fs from 'node:fs';
-import { tmpdir } from 'node:os';
-import { mkdirp } from 'mkdirp';
-import {rimraf} from 'rimraf';
+import { kv } from '@vercel/kv';
 
 const secret = process.env.SECRET;
 const sigLength = parseInt(process.env.SIG_LENGTH);
 const expiry = parseInt(process.env.EXPIRY);
-const dbRoot = tmpdir() + process.env.DBROOT;
-
-const dir = {
-                manyToOne: dbRoot + "/manyToOne/", 
-                oneToMany: dbRoot + "/oneToMany/", 
-                oneToOne: dbRoot + "/oneToOne/", 
-                tmp: dbRoot + "/tmp/"
+const dbKeyPrefix = {
+                manyToOne: "m2o:",
+                oneToMany: "o2m:",
+                oneToOne: "o2o:",
             }
 
 function hash(str){
-    return Crypto.hash('sha256', str, 'base64url'); // For small size str this is faster than fs.createHash()
+    return Crypto.hash('md5', str, 'base64url'); // For small size str this is faster than fs.createHash()
 }
 
 function sign(str){
     // Note: https://nodejs.org/api/crypto.html#using-strings-as-inputs-to-cryptographic-apis
-    return Crypto.createHmac('sha256', secret).update(str).digest('base64url').substr(0,sigLength);
+    return Crypto.createHmac('md5', secret).update(str).digest('base64url').substr(0,sigLength);
 }
 
 export function validate(key){
@@ -51,81 +45,52 @@ export function genKeyPair(seed = Crypto.randomUUID()){
     return {private: privateKey, public: publicKey};
 }
 
-export function setupDB(){
-    for (const key in dir) {
-        mkdirp.sync(dir[key]);
-    }
+export async function publicProduce(publicKey, data){
+    const dbKey = dbKeyPrefix.manyToOne + publicKey;
+    return kv.rpush(dbKey, data).then(kv.expire(dbKey, expiry));
 }
 
-export function publicProduce(publicKey, data){
-    const destDir = dir.manyToOne + publicKey + '/';
-    const uuid = Crypto.randomUUID();
-    const tmpfile = dir.tmp + uuid;
-    fs.writeFileSync(tmpfile, data, {flush: true});
-    mkdirp.sync(destDir);
-    fs.renameSync(tmpfile, destDir + uuid);
-}
-
-export function privateConsume(privateKey){
+export async function privateConsume(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const srcDir = dir.manyToOne + publicKey + '/';
-    if (!fs.existsSync(srcDir)) return [];
-    let aggregatedDataAsArray = [];
-    for (const file of fs.readdirSync(srcDir)) {
-        const data = fs.readFileSync(srcDir + file, 'utf8'); 
-        aggregatedDataAsArray.push(data);
-        fs.unlinkSync(srcDir + file);
-    }
-    return aggregatedDataAsArray;
+    const dbKey = dbKeyPrefix.manyToOne + publicKey;
+    const llen = await kv.llen(dbKey);
+    if (!llen) return [];
+    return kv.lpop(dbKey, llen);
 }
 
-export function privateProduce(privateKey, data){
+export async function privateProduce(privateKey, data){
     const publicKey = genPublicKey(privateKey);
-    const tmpfile = dir.tmp + Crypto.randomUUID();
-    fs.writeFileSync(tmpfile, data, {flush: true});
-    fs.renameSync(tmpfile, dir.oneToMany + publicKey);
+    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    return kv.set(dbKey, data, { ex: expiry });
 }
 
-export function publicConsume(publicKey){
-    const srcFile = dir.oneToMany + publicKey;
-    if (!fs.existsSync(srcFile)) return;    
-    return fs.readFileSync(srcFile, 'utf8');
+export async function publicConsume(publicKey){
+    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    return kv.get(dbKey);
 }
 
-export function oneToOneProduce(privateKey, key, data){
+export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
-    const destDir = dir.oneToOne + publicKey + '/';
-    mkdirp.sync(destDir);
-    const tmpfile = dir.tmp + Crypto.randomUUID();
-    fs.writeFileSync(tmpfile, data, {flush: true});
-    fs.renameSync(tmpfile, destDir + hash(key));    
+    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    let field = {};
+    field[key] = data;
+    return kv.hset(dbKey, field).then(kv.expire(dbKey, expiry));
 }
 
-export function oneToOneConsume(publicKey, key){
-    const srcFile = dir.oneToOne + publicKey + '/' + hash(key)
-    if (!fs.existsSync(srcFile)) return;
-    const data = fs.readFileSync(srcFile, 'utf8');
-    fs.unlinkSync(srcFile);
-    return data;
+export async function oneToOneConsume(publicKey, key){
+    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    const field = key;
+    return kv.hget(dbKey, field).then(kv.hdel(dbKey, field));
 }
 
-export function oneToOneIsConsumed(privateKey, key){
+export async function oneToOneIsConsumed(privateKey, key){
     const publicKey = genPublicKey(privateKey);
-    const srcFile = dir.oneToOne + publicKey + '/' + hash(key);
-    return !fs.existsSync(srcFile);
-}
-
-function isExpired(path){
-    const age = (new Date().getTime() - fs.statSync(path).mtime) / 1000;
-    return age > expiry;
-}
-
-function gcIn(dir){
-    rimraf(dir + '/**/*', {glob: true, filter: isExpired}).then((val) => {console.log(`Garbage cleaned in ${dir}`);}, (err) => {console.log(err.data);});
-}
-
-export function gc(){
-    for (const key in dir) {
-        gcIn(dir[key]);
+    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    const field = key;
+    const bool = await kv.hexists(dbKey, field);
+    if (bool) {
+        return "Not consumed yet.";
+    } else {
+        return "Consumed.";
     }
 }

@@ -1,20 +1,10 @@
 import * as helper from './helper.js';
 import Fastify from 'fastify';
 
-const port = parseInt(process.env.PORT);
 const bodyLimit = parseInt(process.env.BODYLIMIT);
-const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX);
-const rateLimitTimeWindow = process.env.RATE_LIMIT_TIME_WINDOW;
-const rateLimitBan = parseInt(process.env.RATE_LIMIT_BAN);
-const rateLimitMax404 = parseInt(process.env.RATE_LIMIT_MAX_404);
-const rateLimitTimeWindow404 = process.env.RATE_LIMIT_TIME_WINDOW_404;
-const rateLimitBan404 = parseInt(process.env.RATE_LIMIT_BAN_404);
-
-helper.setupDB();
 
 // Impose content-length limit
 const fastify = Fastify({
-  logger: false,
   ignoreTrailingSlash: true,
   bodyLimit: bodyLimit
 })
@@ -24,23 +14,6 @@ fastify.register(import('@fastify/formbody'))
 
 // Enable CORS
 fastify.register(import('@fastify/cors'))
-
-// Enable ratelimiter
-await fastify.register(import('@fastify/rate-limit'), {
-  global: true,
-  max: rateLimitMax,
-  timeWindow: rateLimitTimeWindow,
-  ban: rateLimitBan
-})
-
-// Rate limits for preventing guessing of URLS through 404s
-fastify.setNotFoundHandler({
-  preHandler: fastify.rateLimit({
-    max: rateLimitMax404,
-    timeWindow: rateLimitTimeWindow404,
-    ban: rateLimitBan404
-  })
-})
 
 const callUnauthorized = function(reply, msg){
     reply.code(401);
@@ -72,11 +45,11 @@ fastify.get('/keys/:key', (request, reply) => {
     }
 })
 
-fastify.post('/public/:publicKey', (request, reply) => {
+fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
-        helper.publicProduce(publicKey, JSON.stringify(request.body));
+        await helper.publicProduce(publicKey, JSON.stringify(request.body));
         reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
     } catch (err) {
         if (err == 401) {
@@ -87,11 +60,11 @@ fastify.post('/public/:publicKey', (request, reply) => {
     }    
 })
 
-fastify.get('/private/:privateKey', (request, reply) => {
+fastify.get('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        const dataArray = helper.privateConsume(privateKey);
+        const dataArray = await helper.privateConsume(privateKey);
         if (!dataArray.length) throw 404;
         reply.send(dataArray);
     } catch (err) {
@@ -105,11 +78,11 @@ fastify.get('/private/:privateKey', (request, reply) => {
     }    
 })
 
-fastify.post('/private/:privateKey', (request, reply) => {
+fastify.post('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        helper.privateProduce(privateKey, JSON.stringify(request.body));
+        await helper.privateProduce(privateKey, JSON.stringify(request.body));
         reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
     } catch (err) {
         if (err == 401) {
@@ -120,11 +93,11 @@ fastify.post('/private/:privateKey', (request, reply) => {
     }    
 })
 
-fastify.get('/public/:publicKey', (request, reply) => {
+fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
-        const data = helper.publicConsume(publicKey);
+        const data = await helper.publicConsume(publicKey);
         if (!data) throw 404;
         reply.send(data);
     } catch (err) {
@@ -138,11 +111,11 @@ fastify.get('/public/:publicKey', (request, reply) => {
     }    
 })
 
-fastify.post('/private/:privateKey/:key', (request, reply) => {
+fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        helper.oneToOneProduce(privateKey, key, JSON.stringify(request.body));
+        await helper.oneToOneProduce(privateKey, key, JSON.stringify(request.body));
         reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
     } catch (err) {
         if (err == 401) {
@@ -153,11 +126,11 @@ fastify.post('/private/:privateKey/:key', (request, reply) => {
     }    
 })
 
-fastify.get('/public/:publicKey/:key', (request, reply) => {
+fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
-        const data = helper.oneToOneConsume(publicKey, key);
+        const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw 404;
         reply.send(data);
     } catch (err) {
@@ -171,11 +144,11 @@ fastify.get('/public/:publicKey/:key', (request, reply) => {
     }    
 })
 
-fastify.get('/private/:privateKey/:key', (request, reply) => {
+fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        reply.send(helper.oneToOneIsConsumed(privateKey, key));
+        reply.send(await helper.oneToOneIsConsumed(privateKey, key));
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
@@ -184,11 +157,6 @@ fastify.get('/private/:privateKey/:key', (request, reply) => {
         }
     }    
 })
-
-fastify.get('/gc', (request, reply) => { 
-    helper.gc();
-    return 'Garbage cleaner launched.'
-});
 
 export default async function handler(req, res) {
   await fastify.ready();
