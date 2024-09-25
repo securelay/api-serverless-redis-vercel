@@ -2,8 +2,9 @@ import Crypto from 'node:crypto';
 import { kv } from '@vercel/kv';
 
 const secret = process.env.SECRET;
-const sigLength = parseInt(process.env.SIG_LENGTH);
-const expiry = parseInt(process.env.EXPIRY);
+const sigLen = parseInt(process.env.SIG_LEN);
+const hashLen = parseInt(process.env.HASH_LEN);
+const ttl = parseInt(process.env.TTL);
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
                 oneToMany: "o2m:",
@@ -11,17 +12,18 @@ const dbKeyPrefix = {
             }
 
 function hash(str){
-    return Crypto.hash('md5', str, 'base64url'); // For small size str this is faster than fs.createHash()
+    return Crypto.hash('md5', str, 'base64url').substr(0,hashLen);
+    // For small size str Crypto.hash() is faster than Crypto.createHash()
 }
 
 function sign(str){
     // Note: https://nodejs.org/api/crypto.html#using-strings-as-inputs-to-cryptographic-apis
-    return Crypto.createHmac('md5', secret).update(str).digest('base64url').substr(0,sigLength);
+    return Crypto.createHmac('md5', secret).update(str).digest('base64url').substr(0,sigLen);
 }
 
 export function validate(key){
-    const sig = key.substr(0, sigLength);
-    const hash = key.substr(sigLength,);
+    const sig = key.substr(0, sigLen);
+    const hash = key.substr(sigLen,);
     if (sig === sign(hash + 'public')){
         return 'public';
     } else if (sig === sign(hash + 'private')){
@@ -32,7 +34,7 @@ export function validate(key){
 }
 
 export function genPublicKey(privateKey){
-    const privateHash = privateKey.substr(sigLength,);
+    const privateHash = privateKey.substr(sigLen,);
     const publicHash = hash(privateHash);
     const publicKey = sign(publicHash + 'public') + publicHash;
     return publicKey
@@ -47,7 +49,7 @@ export function genKeyPair(seed = Crypto.randomUUID()){
 
 export async function publicProduce(publicKey, data){
     const dbKey = dbKeyPrefix.manyToOne + publicKey;
-    return kv.rpush(dbKey, data).then(kv.expire(dbKey, expiry));
+    return kv.rpush(dbKey, data).then(kv.expire(dbKey, ttl));
 }
 
 export async function privateConsume(privateKey){
@@ -61,7 +63,7 @@ export async function privateConsume(privateKey){
 export async function privateProduce(privateKey, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
-    return kv.set(dbKey, data, { ex: expiry });
+    return kv.set(dbKey, data, { ex: ttl });
 }
 
 export async function publicConsume(publicKey){
@@ -74,7 +76,7 @@ export async function oneToOneProduce(privateKey, key, data){
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     let field = {};
     field[key] = data;
-    return kv.hset(dbKey, field).then(kv.expire(dbKey, expiry));
+    return kv.hset(dbKey, field).then(kv.expire(dbKey, ttl));
 }
 
 export async function oneToOneConsume(publicKey, key){

@@ -16,13 +16,11 @@ fastify.register(import('@fastify/formbody'))
 fastify.register(import('@fastify/cors'))
 
 const callUnauthorized = function(reply, msg){
-    reply.code(401);
-    reply.send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
+    reply.code(401).send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
 }
 
 const callInternalServerError = function(reply, msg){
-    reply.code(500);
-    reply.send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
+    reply.code(500).send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
 }
 
 fastify.get('/', (request, reply) => {
