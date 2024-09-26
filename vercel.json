@@ -1,12 +1,16 @@
 {
+  "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://securelay.github.io/",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/(public|private|keys)/:path*",
       "destination": "/api"
-    },
-    {
-      "source": "/",
-      "destination": "https://securelay.github.io/"
     }
   ]
 }

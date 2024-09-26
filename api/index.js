@@ -1,6 +1,5 @@
 import * as helper from './helper.js';
 import Fastify from 'fastify';
-import cors from '@fastify/cors';
 
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 const fieldLimit = parseInt(process.env.FIELDLIMIT);
@@ -11,13 +10,17 @@ const fastify = Fastify({
   bodyLimit: bodyLimit
 })
 
+// Enable CORS. This implementation is lightweight than importing '@fastify/cors'
+fastify.addHook('onRequest', (request, reply, done) => {
+    reply.headers({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,POST'
+    })
+    done();
+})
+
 // Enable parser for application/x-www-form-urlencoded
 fastify.register(import('@fastify/formbody'))
-
-// Enable CORS
-await fastify.register(cors, {
-    methods: 'GET,POST',
-})
 
 const callUnauthorized = function(reply, msg){
     reply.code(401).send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
@@ -32,7 +35,11 @@ const callInternalServerError = function(reply, msg){
 }
 
 fastify.get('/', (request, reply) => {
-    reply.redirect('https://securelay.github.io');
+    reply.redirect('https://securelay.github.io', 301);
+})
+
+fastify.post('/', (request, reply) => {
+    reply.redirect('https://securelay.github.io', 301);
 })
 
 fastify.get('/keys', (request, reply) => {
