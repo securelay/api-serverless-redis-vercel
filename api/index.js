@@ -1,7 +1,9 @@
 import * as helper from './helper.js';
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 
 const bodyLimit = parseInt(process.env.BODYLIMIT);
+const fieldLimit = parseInt(process.env.FIELDLIMIT);
 
 // Impose content-length limit
 const fastify = Fastify({
@@ -13,10 +15,16 @@ const fastify = Fastify({
 fastify.register(import('@fastify/formbody'))
 
 // Enable CORS
-fastify.register(import('@fastify/cors'))
+await fastify.register(cors, {
+    methods: 'GET,POST',
+})
 
 const callUnauthorized = function(reply, msg){
     reply.code(401).send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
+}
+
+const callBadRequest = function(reply, msg){
+    reply.code(400).send({message: msg, error: "Bad Request", statusCode: reply.statusCode});
 }
 
 const callInternalServerError = function(reply, msg){
@@ -111,6 +119,7 @@ fastify.get('/public/:publicKey', async (request, reply) => {
 
 fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
+    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(request.body));
@@ -126,6 +135,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
 
 fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
+    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
         const data = await helper.oneToOneConsume(publicKey, key);
@@ -144,6 +154,7 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
 
 fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
+    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
         reply.send(await helper.oneToOneIsConsumed(privateKey, key));
