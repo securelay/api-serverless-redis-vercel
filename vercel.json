@@ -1,0 +1,23 @@
+{
+  "buildCommand": null,
+  "devCommand": null,
+  "framework": null,
+  "installCommand": "npm install",
+  "nodeVersion": "20.x",
+  "outputDirectory": null,
+  "rootDirectory": null,
+  "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://securelay.github.io/",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(public|private|keys)/:path*",
+      "destination": "/api"
+    }
+  ]
+}
