@@ -1,4 +1,11 @@
 {
+  "buildCommand": null,
+  "devCommand": null,
+  "framework": null,
+  "installCommand": "npm install",
+  "nodeVersion": "20.x",
+  "outputDirectory": null,
+  "rootDirectory": null,
   "trailingSlash": false,
   "redirects": [
     {
