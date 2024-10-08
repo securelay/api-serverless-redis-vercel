@@ -66,6 +66,12 @@ export async function privateProduce(privateKey, data){
     return kv.set(dbKey, data, { ex: ttl });
 }
 
+export async function privateDelete(privateKey){
+    const publicKey = genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    return kv.del(dbKey);
+}
+
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
     return kv.get(dbKey);

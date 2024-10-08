@@ -106,6 +106,21 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     }    
 })
 
+fastify.delete('/private/:privateKey', async (request, reply) => {
+    const { privateKey } = request.params;
+    try {
+        if (helper.validate(privateKey) !== 'private') throw 401;
+        await helper.privateDelete(privateKey);
+        reply.code(204);
+    } catch (err) {
+        if (err == 401) {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else {
+            callInternalServerError(reply, err);
+        }
+    }
+})
+
 fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     try {
