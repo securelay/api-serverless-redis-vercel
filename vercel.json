@@ -16,6 +16,10 @@
     {
       "source": "/(public|private|keys)/:path*",
       "destination": "/api"
+    },
+    {
+      "source": "/id",
+      "destination": "/api"
     }
   ]
 }

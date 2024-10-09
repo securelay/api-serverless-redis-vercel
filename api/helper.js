@@ -21,6 +21,10 @@ function sign(str){
     return Crypto.createHmac('md5', secret).update(str).digest('base64url').substr(0,sigLen);
 }
 
+export function id(){
+    return sign('id');
+}
+
 export function validate(key){
     const sig = key.substr(0, sigLen);
     const hash = key.substr(sigLen,);

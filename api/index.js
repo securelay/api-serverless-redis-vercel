@@ -38,8 +38,8 @@ fastify.get('/', (request, reply) => {
     reply.redirect('https://securelay.github.io', 301);
 })
 
-fastify.post('/', (request, reply) => {
-    reply.redirect('https://securelay.github.io', 301);
+fastify.get('/id', (request, reply) => {
+    reply.send(helper.id());
 })
 
 fastify.get('/keys', (request, reply) => {
