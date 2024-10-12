@@ -1,5 +1,5 @@
 import Crypto from 'node:crypto';
-import { kv } from '@vercel/kv';
+import { createClient } from '@vercel/kv';
 
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
@@ -10,6 +10,10 @@ const dbKeyPrefix = {
                 oneToMany: "o2m:",
                 oneToOne: "o2o:",
             }
+const kv = createClient({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+})
 
 function hash(str){
     return Crypto.hash('md5', str, 'base64url').substr(0,hashLen);
