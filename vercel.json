@@ -2,6 +2,11 @@
   "buildCommand": null,
   "devCommand": null,
   "framework": null,
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 1
+    }
+  },
   "installCommand": "npm install",
   "outputDirectory": null,
   "trailingSlash": false,

@@ -80,6 +80,12 @@ export async function privateDelete(privateKey){
     return kv.del(dbKey);
 }
 
+export async function privateRefresh(privateKey){
+    const publicKey = genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    return kv.expire(dbKey, ttl);
+}
+
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
     return kv.get(dbKey);

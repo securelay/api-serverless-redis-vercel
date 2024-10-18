@@ -60,15 +60,25 @@ fastify.get('/keys/:key', (request, reply) => {
 
 fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
+    const redirectOnOk = request.query.ok;
+    const redirectOnErr = request.query.err;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
         await helper.publicProduce(publicKey, JSON.stringify(request.body));
-        reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
-    } catch (err) {
-        if (err == 401) {
-            callUnauthorized(reply, 'Provided key is not Public');
+        if (redirectOnOk == null) {
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
-            callInternalServerError(reply, err);
+            reply.redirect(redirectOnOk, 303);
+        }
+    } catch (err) {
+        if (redirectOnErr == null) {
+            if (err == 401) {
+                callUnauthorized(reply, 'Provided key is not Public');
+            } else {
+                callInternalServerError(reply, err);
+            }
+        } else {
+            reply.redirect(redirectOnErr, 303);
         }
     }    
 })
@@ -93,15 +103,25 @@ fastify.get('/private/:privateKey', async (request, reply) => {
 
 fastify.post('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
+    const redirectOnOk = request.query.ok;
+    const redirectOnErr = request.query.err;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
         await helper.privateProduce(privateKey, JSON.stringify(request.body));
-        reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
-    } catch (err) {
-        if (err == 401) {
-            callUnauthorized(reply, 'Provided key is not Private');
+        if (redirectOnOk == null) {
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
-            callInternalServerError(reply, err);
+            reply.redirect(redirectOnOk, 303);
+        }
+    } catch (err) {
+        if (redirectOnErr == null) {
+            if (err == 401) {
+                callUnauthorized(reply, 'Provided key is not Private');
+            } else {
+                callInternalServerError(reply, err);
+            }
+        } else {
+            reply.redirect(redirectOnErr, 303);
         }
     }    
 })
@@ -112,6 +132,21 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
         if (helper.validate(privateKey) !== 'private') throw 401;
         await helper.privateDelete(privateKey);
         reply.code(204);
+    } catch (err) {
+        if (err == 401) {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else {
+            callInternalServerError(reply, err);
+        }
+    }
+})
+
+fastify.patch('/private/:privateKey', async (request, reply) => {
+    const { privateKey } = request.params;
+    try {
+        if (helper.validate(privateKey) !== 'private') throw 401;
+        await helper.privateRefresh(privateKey);
+        reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
@@ -141,30 +176,44 @@ fastify.get('/public/:publicKey', async (request, reply) => {
 
 fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
-    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
+    const redirectOnOk = request.query.ok;
+    const redirectOnErr = request.query.err;
     try {
+        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(request.body));
-        reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
-    } catch (err) {
-        if (err == 401) {
-            callUnauthorized(reply, 'Provided key is not Private');
+        if (redirectOnOk == null) {
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
-            callInternalServerError(reply, err);
+            reply.redirect(redirectOnOk, 303);
+        }
+    } catch (err) {
+        if (redirectOnErr == null) {
+            if (err == 400) {
+                callBadRequest(reply, 'Provided field is too long');
+            } else if (err == 401) {
+                callUnauthorized(reply, 'Provided key is not Private');
+            } else {
+                callInternalServerError(reply, err);
+            }
+        } else {
+            reply.redirect(redirectOnErr, 303);
         }
     }    
 })
 
 fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
-    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
     try {
+        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(publicKey) !== 'public') throw 401;
         const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw 404;
         reply.send(data);
     } catch (err) {
-        if (err == 401) {
+        if (err == 400) {
+            callBadRequest(reply, 'Provided field is too long');
+        } else if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Public');
         } else if (err == 404) {
             reply.callNotFound();
@@ -176,12 +225,14 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
 
 fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
-    if (key.substr(0,fieldLimit) !== key) {callBadRequest(reply, 'Provided field is too long'); return;}
     try {
+        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
         reply.send(await helper.oneToOneIsConsumed(privateKey, key));
     } catch (err) {
-        if (err == 401) {
+        if (err == 400) {
+            callBadRequest(reply, 'Provided field is too long');
+        } else if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
             callInternalServerError(reply, err);
