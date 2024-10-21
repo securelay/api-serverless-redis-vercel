@@ -4,7 +4,7 @@
   "framework": null,
   "functions": {
     "api/*.js": {
-      "maxDuration": 1
+      "maxDuration": 5
     }
   },
   "installCommand": "npm install",
