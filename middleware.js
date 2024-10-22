@@ -5,16 +5,20 @@ https://vercel.com/docs/functions/edge-middleware/middleware-api
 https://upstash.com/docs/redis/sdks/ratelimit-ts/features#caching
 https://upstash.com/docs/redis/sdks/ratelimit-ts/methods#limit
 https://upstash.com/docs/redis/sdks/ratelimit-ts/traffic-protection
+https://github.com/upstash/ratelimit-js/issues/122
 */
-import { ipAddress } from '@vercel/functions'
-import { next } from '@vercel/edge'
-import { Ratelimit } from '@upstash/ratelimit'
-import { kv } from '@vercel/kv'
+import { ipAddress } from '@vercel/functions';
+import { next } from '@vercel/edge';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
 const cache = new Map(); // must be outside of your serverless function handler
 
 const ratelimit = new Ratelimit({
-  redis: kv,
+  redis: new Redis({
+    url: process.env.KV_REST_API_URL,
+    token: process.env.KV_REST_API_TOKEN,
+  }),
   ephemeralCache: cache,
   analytics: false,
   limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW),
