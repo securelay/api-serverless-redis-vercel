@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 const fieldLimit = parseInt(process.env.FIELDLIMIT);
+const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT);
 
 // Impose content-length limit
 const fastify = Fastify({
@@ -62,11 +63,41 @@ fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
+    const data = JSON.stringify(request.body);
+    let webhook, webhookUsed, timeoutID;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
-        await helper.publicProduce(publicKey, JSON.stringify(request.body));
+
+        // Try posting the data to webhook, if any. On fail, store/bin data for later retrieval.
+        try {
+            webhook = await helper.cacheGet(publicKey, 'hook');
+            if (webhook == null) throw 'No webhook';
+            const fetchStartedAt = Date.now();
+            const response = await fetch(webhook, {
+                method: "POST",
+                headers: { "Content-type": "application/json" },
+                body: data,
+                signal: AbortSignal.timeout(webhookTimeout)
+            })
+            /* Set race condition for aborting `await response.text()` below,
+            after the time remaining from `WEBHOOK_TIMEOUT`. */
+            timeoutID = setTimeout(() => {
+                                throw new Error('Webhook timeout');
+                            }, webhookTimeout - Date.now() + fetchStartedAt
+                        )
+            await response.text();
+            clearTimeout(timeoutID);
+            if (! response.ok) throw response.status;
+            webhookUsed = webhook;
+        } catch (err) {
+            clearTimeout(timeoutID);
+            await helper.publicProduce(publicKey, data);
+            await helper.cacheDel(publicKey, 'hook'); // Delete webhook from cache if webhook is of no use! 
+            webhookUsed = null;
+        }
+        
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: Boolean(webhookUsed)});
         } else {
             reply.redirect(redirectOnOk, 303);
         }
@@ -85,8 +116,14 @@ fastify.post('/public/:publicKey', async (request, reply) => {
 
 fastify.get('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
+    const webhook = request.query.hook;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
+        if (webhook == null) {
+            await helper.cacheDel(privateKey, 'hook');
+        } else {
+            await helper.cacheSet(privateKey, {hook:webhook});
+        }
         const dataArray = await helper.privateConsume(privateKey);
         if (!dataArray.length) throw 404;
         reply.send(dataArray);

@@ -21,7 +21,8 @@ const ratelimit = new Ratelimit({
   }),
   ephemeralCache: cache,
   analytics: false,
-  limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW),
+  limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
+  prefix: "rl:",
   enableProtection: true
 })
 
