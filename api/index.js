@@ -63,37 +63,32 @@ fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-    const data = JSON.stringify(request.body);
-    let webhook, webhookUsed, timeoutID;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
 
-        // Try posting the data to webhook, if any. On fail, store/bin data for later retrieval.
+        const data = JSON.stringify(request.body);
+        let webhookUsed;
+
+        // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
         try {
-            webhook = await helper.cacheGet(publicKey, 'hook');
-            if (webhook == null) throw 'No webhook';
-            const fetchStartedAt = Date.now();
-            const response = await fetch(webhook, {
+            const webhook = await helper.cacheGet(publicKey, 'hook');
+            if (webhook == null) throw new Error('No webhook');
+            
+            await fetch(webhook, {
                 method: "POST",
                 headers: { "Content-type": "application/json" },
                 body: data,
                 signal: AbortSignal.timeout(webhookTimeout)
+            }).then((response) => {
+                if (! response.ok) throw new Error(response.status);
+                return response.text();
             })
-            /* Set race condition for aborting `await response.text()` below,
-            after the time remaining from `WEBHOOK_TIMEOUT`. */
-            timeoutID = setTimeout(() => {
-                                throw new Error('Webhook timeout');
-                            }, webhookTimeout - Date.now() + fetchStartedAt
-                        )
-            await response.text();
-            clearTimeout(timeoutID);
-            if (! response.ok) throw response.status;
+            
             webhookUsed = webhook;
         } catch (err) {
-            clearTimeout(timeoutID);
             await helper.publicProduce(publicKey, data);
-            await helper.cacheDel(publicKey, 'hook'); // Delete webhook from cache if webhook is of no use! 
-            webhookUsed = null;
+            // Delete webhook from cache if webhook is of no use!
+            if (err.message !== 'No webhook') await helper.cacheDel(publicKey, 'hook');
         }
         
         if (redirectOnOk == null) {
