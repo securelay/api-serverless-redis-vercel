@@ -113,6 +113,24 @@ export async function privateRefresh(privateKey){
     return redisData.expire(dbKey, ttl);
 }
 
+export async function privateStats(privateKey){
+    const publicKey = genPublicKey(privateKey);
+    const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey;
+    const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey;
+    const countConsume = await redisData.llen(dbKeyConsume);
+    const ttlConsume = await redisData.ttl(dbKeyConsume);
+    const ttlPublish = await redisData.ttl(dbKeyPublish);
+    return {
+      consume: {
+        count: countConsume,
+        ttl: ttlConsume < 0 ? 0 : ttlConsume
+        },
+      publish: {
+        ttl: ttlPublish < 0 ? 0 : ttlPublish
+        }
+      };
+}
+
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
     return redisData.get(dbKey);
@@ -132,14 +150,14 @@ export async function oneToOneConsume(publicKey, key){
     return redisData.hget(dbKey, field).then(redisData.hdel(dbKey, field));
 }
 
-export async function oneToOneIsConsumed(privateKey, key){
+export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     const field = key;
     const bool = await redisData.hexists(dbKey, field);
     if (bool) {
-        return "Not consumed yet.";
+        return {ttl: await redisData.ttl(dbKey)};
     } else {
-        return "Consumed.";
+        return {ttl: 0};
     }
 }

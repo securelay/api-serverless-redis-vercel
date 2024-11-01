@@ -112,6 +112,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
 fastify.get('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const webhook = request.query.hook;
+    const statsPresent = 'stats' in request.query;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
         if (webhook == null) {
@@ -119,6 +120,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
         } else {
             await helper.cacheSet(privateKey, {hook:webhook});
         }
+        if (statsPresent) return helper.privateStats(privateKey);
         const dataArray = await helper.privateConsume(privateKey);
         if (!dataArray.length) throw 404;
         reply.send(dataArray);
@@ -260,7 +262,7 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
     try {
         if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
-        reply.send(await helper.oneToOneIsConsumed(privateKey, key));
+        return helper.oneToOneTTL(privateKey, key);
     } catch (err) {
         if (err == 400) {
             callBadRequest(reply, 'Provided field is too long');
