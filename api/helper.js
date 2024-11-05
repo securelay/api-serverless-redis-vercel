@@ -3,7 +3,8 @@ Refs:
 https://upstash.com/docs/redis/sdks/ts/pipelining/pipeline-transaction
 https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 */
-import Crypto from 'node:crypto';
+import { hash as cryptoHash, createHmac, getRandomValues, randomUUID } from 'node:crypto';
+import { Buffer } from "node:buffer";
 import { Redis } from '@upstash/redis';
 
 const secret = process.env.SECRET;
@@ -33,13 +34,22 @@ const redisRateLimit = new Redis({
 })
 
 function hash(str){
-    return Crypto.hash('md5', str, 'base64url').substr(0,hashLen);
-    // For small size str Crypto.hash() is faster than Crypto.createHash()
+    return cryptoHash('md5', str, 'base64url').substring(0,hashLen);
+    // For small size str crypto.hash() is faster than crypto.createHash()
+    // Ref: https://nodejs.org/api/crypto.html#cryptohashalgorithm-data-outputencoding
 }
 
 function sign(str){
-    // Note: https://nodejs.org/api/crypto.html#using-strings-as-inputs-to-cryptographic-apis
-    return Crypto.createHmac('md5', secret).update(str).digest('base64url').substr(0,sigLen);
+    // Ref: https://nodejs.org/api/crypto.html#using-strings-as-inputs-to-cryptographic-apis
+    return createHmac('md5', secret).update(str).digest('base64url').substring(0,sigLen);
+}
+
+//Brief: Return random base64url string of given length
+function randStr(len = hashLen){
+  const byteSize = Math.ceil(len*6/8);
+  const buff = Buffer.alloc(byteSize);
+  getRandomValues(buff);
+  return buff.toString('base64url').substring(0,len);
 }
 
 export function id(){
@@ -47,8 +57,8 @@ export function id(){
 }
 
 export function validate(key){
-    const sig = key.substr(0, sigLen);
-    const hash = key.substr(sigLen,);
+    const sig = key.substring(0, sigLen);
+    const hash = key.substring(sigLen);
     if (sig === sign(hash + 'public')){
         return 'public';
     } else if (sig === sign(hash + 'private')){
@@ -61,7 +71,7 @@ export function validate(key){
 export function genPublicKey(privateOrPublicKey){
     if (validate(privateOrPublicKey) === 'public') return privateOrPublicKey;
     const privateKey = privateOrPublicKey;
-    const privateHash = privateKey.substr(sigLen,);
+    const privateHash = privateKey.substring(sigLen);
     const publicHash = hash(privateHash);
     const publicKey = sign(publicHash + 'public') + publicHash;
     return publicKey;
@@ -90,7 +100,7 @@ export function cacheDel(privateOrPublicKey, key){
     return redisRateLimit.hdel(dbKey, key);
 }
 
-export function genKeyPair(seed = Crypto.randomUUID()){
+export function genKeyPair(seed = randomUUID()){
     const privateHash = hash(seed);
     const privateKey = sign(privateHash + 'private') + privateHash;
     const publicKey = genPublicKey(privateKey);
