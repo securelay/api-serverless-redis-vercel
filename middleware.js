@@ -28,12 +28,8 @@ const ratelimit = new Ratelimit({
 
 export default async function middleware(request) {
   // You could alternatively limit based on user ID or similar
-  const ip = ipAddress(request) || '127.0.0.1'
-  const { success, pending, reset } = await ratelimit.limit(
-    ip
-  )
-
-  await pending;
+  const ip = ipAddress(request) || '127.0.0.1';
+  const { success, reset } = await ratelimit.limit(ip);
 
   return success ? next() : Response.json(
     { message: `Try after ${(reset - Date.now())/1000} seconds`, error: "Too Many Requests", statusCode: 429 },

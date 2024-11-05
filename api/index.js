@@ -72,7 +72,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
         // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
         try {
             const webhook = await helper.cacheGet(publicKey, 'hook');
-            if (webhook == null) throw new Error('No webhook');
+            if (!webhook) throw new Error('No webhook');
             
             await fetch(webhook, {
                 method: "POST",
@@ -86,9 +86,10 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             
             webhookUsed = webhook;
         } catch (err) {
-            await helper.publicProduce(publicKey, data);
-            // Delete webhook from cache if webhook is of no use!
-            if (err.message !== 'No webhook') await helper.cacheDel(publicKey, 'hook');
+            await Promise.all([
+              helper.publicProduce(publicKey, data),
+              helper.cacheDel(publicKey, 'hook')
+            ])
         }
         
         if (redirectOnOk == null) {
@@ -113,15 +114,30 @@ fastify.get('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const webhook = request.query.hook;
     const statsPresent = 'stats' in request.query;
+
+    let webhookHandler, statsHandler, dataHandler;
+    webhookHandler = statsHandler = dataHandler = () => null; // default
+
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
         if (webhook == null) {
-            await helper.cacheDel(privateKey, 'hook');
+            webhookHandler = () => helper.cacheDel(privateKey, 'hook');
         } else {
-            await helper.cacheSet(privateKey, {hook:webhook});
+            webhookHandler = () => helper.cacheSet(privateKey, {hook:webhook});
         }
-        if (statsPresent) return helper.privateStats(privateKey);
-        const dataArray = await helper.privateConsume(privateKey);
+        if (statsPresent) {
+          statsHandler = () => helper.privateStats(privateKey);
+        } else {
+          dataHandler = () => helper.privateConsume(privateKey);
+        }
+        
+        const [ _, statsObj, dataArray ] = await Promise.all([
+          webhookHandler(),
+          statsHandler(),
+          dataHandler()
+        ])
+        
+        if (statsPresent) return statsObj;
         if (!dataArray.length) throw 404;
         reply.send(dataArray);
     } catch (err) {

@@ -25,6 +25,6 @@ console.log(await helper.publicConsume(key.public));
 
 await helper.oneToOneProduce(key.private, 'some Key', 'data "for one to one at some key');
 console.log(await helper.oneToOneConsume(key.public, 'some Key'));
-console.log(await helper.oneToOneIsConsumed(key.private, 'some Key'));
+console.log(await helper.oneToOneTTL(key.private, 'some Key'));
 
 console.log('End of synchronous execution. Anything logged after this is from async only!')

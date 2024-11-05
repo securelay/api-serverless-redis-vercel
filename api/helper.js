@@ -1,5 +1,10 @@
+/*
+Refs:
+https://upstash.com/docs/redis/sdks/ts/pipelining/pipeline-transaction
+https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
+*/
 import Crypto from 'node:crypto';
-import { createClient } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
@@ -13,14 +18,18 @@ const dbKeyPrefix = {
                 cache: "cache:"
             }
 // Redis client for user database
-const redisData = createClient({
+const redisData = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  latencyLogging: false,
+  enableAutoPipelining: true
 })
 // Redis client for ratelimiter database
-const redisRateLimit = createClient({
+const redisRateLimit = new Redis({
   url: process.env.KV_REST_API_URL,
   token: process.env.KV_REST_API_TOKEN,
+  latencyLogging: false,
+  enableAutoPipelining: true
 })
 
 function hash(str){
@@ -61,7 +70,13 @@ export function genPublicKey(privateOrPublicKey){
 export function cacheSet(privateKey, obj){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.cache + publicKey;
-    return redisRateLimit.hset(dbKey, obj).then(redisRateLimit.expire(dbKey, cacheTtl));
+    // Promise.all below enables both commands to be executed in a single http request (using same pipeline)
+    // As Redis is single-threaded, the commands are executed in order
+    // See https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
+    return Promise.all([
+      redisRateLimit.hset(dbKey, obj),
+      redisRateLimit.expire(dbKey, cacheTtl)
+    ])
 }
 
 export function cacheGet(publicKey, key){
@@ -84,15 +99,20 @@ export function genKeyPair(seed = Crypto.randomUUID()){
 
 export async function publicProduce(publicKey, data){
     const dbKey = dbKeyPrefix.manyToOne + publicKey;
-    return redisData.rpush(dbKey, data).then(redisData.expire(dbKey, ttl));
+    return Promise.all([
+      redisData.rpush(dbKey, data),
+      redisData.expire(dbKey, ttl)
+    ])
 }
 
 export async function privateConsume(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.manyToOne + publicKey;
-    const llen = await redisData.llen(dbKey);
-    if (!llen) return [];
-    return redisData.lpop(dbKey, llen);
+    const atomicTransaction = redisData.multi();
+    atomicTransaction.lrange(dbKey, 0, -1);
+    atomicTransaction.del(dbKey);
+    return atomicTransaction.exec()
+      .then((values) => values[0]);
 }
 
 export async function privateProduce(privateKey, data){
@@ -117,9 +137,11 @@ export async function privateStats(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey;
     const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey;
-    const countConsume = await redisData.llen(dbKeyConsume);
-    const ttlConsume = await redisData.ttl(dbKeyConsume);
-    const ttlPublish = await redisData.ttl(dbKeyPublish);
+    const [ countConsume, ttlConsume, ttlPublish ] = await Promise.all([
+      redisData.llen(dbKeyConsume),
+      redisData.ttl(dbKeyConsume),
+      redisData.ttl(dbKeyPublish)
+    ])
     return {
       consume: {
         count: countConsume,
@@ -141,23 +163,29 @@ export async function oneToOneProduce(privateKey, key, data){
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     let field = {};
     field[key] = data;
-    return redisData.hset(dbKey, field).then(redisData.expire(dbKey, ttl));
+    return Promise.all([
+      redisData.hset(dbKey, field),
+      redisData.expire(dbKey, ttl)
+    ])
 }
 
 export async function oneToOneConsume(publicKey, key){
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     const field = key;
-    return redisData.hget(dbKey, field).then(redisData.hdel(dbKey, field));
+    const atomicTransaction = redisData.multi();
+    atomicTransaction.hget(dbKey, field);
+    atomicTransaction.hdel(dbKey, field);
+    return atomicTransaction.exec()
+      .then((values) => values[0]);
 }
 
 export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     const field = key;
-    const bool = await redisData.hexists(dbKey, field);
-    if (bool) {
-        return {ttl: await redisData.ttl(dbKey)};
-    } else {
-        return {ttl: 0};
-    }
+    const [ bool, ttl ] = await Promise.all([
+      redisData.hexists(dbKey, field),
+      redisData.ttl(dbKey)
+    ])
+    return {ttl: bool ? ttl : 0};
 }
