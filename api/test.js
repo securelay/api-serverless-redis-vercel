@@ -14,6 +14,12 @@ console.log('This should show public: ' + helper.validate(key.public));
 console.log('This should show private: ' + helper.validate(key.private));
 console.log('This should show false: ' + helper.validate('random'));
 
+console.log('Stream token private POST:', await helper.streamToken(key.private, false));
+console.log('Stream token public GET:', await helper.streamToken(key.public));
+console.log('Stream token public POST:', await helper.streamToken(key.public, false));
+console.log('Stream token public POST:', await helper.streamToken(key.public, false));
+console.log('Stream token private GET:', await helper.streamToken(key.private, true));
+
 await helper.publicProduce(key.public, 'dataA hi"');
 await helper.publicProduce(key.public, 'dataB hi"');
 await helper.publicProduce(key.public, 'dataC hi"');

@@ -15,7 +15,7 @@ const fastify = Fastify({
 fastify.addHook('onRequest', (request, reply, done) => {
     reply.headers({
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET,POST,DELETE'
+        'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE'
     })
     done();
 })
@@ -76,6 +76,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             
             await fetch(webhook, {
                 method: "POST",
+                redirect: "follow",
                 headers: { "Content-type": "application/json" },
                 body: data,
                 signal: AbortSignal.timeout(webhookTimeout)
@@ -288,6 +289,48 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
             callInternalServerError(reply, err);
         }
     }    
+})
+
+fastify.get('/stream/:key', async (request, reply) => {
+  const { key } = request.params;
+  try {
+    const token = await helper.streamToken(key);
+    reply.redirect('https://ppng.io/' + token, 307);
+  } catch (err) {
+    if (err.message == 'Invalid Key') {
+      callUnauthorized(reply, 'Provided key is invalid');
+    } else {
+            callInternalServerError(reply, err);
+    }
+  }
+})
+
+fastify.put('/stream/:key', async (request, reply) => {
+  const { key } = request.params;
+  try {
+    const token = await helper.streamToken(key, false);
+    reply.redirect('https://ppng.io/' + token, 307);
+  } catch (err) {
+    if (err.message == 'Invalid Key') {
+      callUnauthorized(reply, 'Provided key is invalid');
+    } else {
+            callInternalServerError(reply, err);
+    }
+  }
+})
+
+fastify.post('/stream/:key', async (request, reply) => {
+  const { key } = request.params;
+  try {
+    const token = await helper.streamToken(key, false);
+    reply.redirect('https://ppng.io/' + token, 307);
+  } catch (err) {
+    if (err.message == 'Invalid Key') {
+      callUnauthorized(reply, 'Provided key is invalid');
+    } else {
+            callInternalServerError(reply, err);
+    }
+  }
 })
 
 export default async function handler(req, res) {
