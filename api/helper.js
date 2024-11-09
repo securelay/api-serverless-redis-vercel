@@ -13,6 +13,8 @@ const hashLen = parseInt(process.env.HASH_LEN);
 const ttl = parseInt(process.env.TTL);
 const cacheTtl = parseInt(process.env.CACHE_TTL);
 const streamTimeout = parseInt(process.env.STREAM_TIMEOUT);
+const streamCount = parseInt(process.env.STREAM_COUNT);
+
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
                 oneToMany: "o2m:",
@@ -212,6 +214,7 @@ export async function oneToOneTTL(privateKey, key){
     return {ttl: bool ? ttl : 0};
 }
 
+// Tokens are stored in LIFO stacks. Old and unused tokens are trimmed.
 export async function streamToken(privateOrPublicKey, receive=true){
   const type = validate(privateOrPublicKey, false);
   const typeComplement = (type == 'private') ? 'public' : 'private';
@@ -222,9 +225,10 @@ export async function streamToken(privateOrPublicKey, receive=true){
   if (existing) return existing;
   const token = randStr();
   const dbKey = dbKeyPrefix.stream[type][mode] + publicKey;
-  await Promise.all([
-    redisData.rpush(dbKey, token),
-    redisData.expire(dbKey, streamTimeout)
+  Promise.all([
+    redisData.lpush(dbKey, token),
+    redisData.expire(dbKey, streamTimeout),
+    redisData.ltrim(dbKey, 0, streamCount)
   ])
   return token;
 }
