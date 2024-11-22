@@ -12,6 +12,10 @@ import { next } from '@vercel/edge';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 
+export const config = {
+  matcher: ['/public/:path*', '/private/:path*', '/keys/:path*', '/pipe/:path*']
+};
+
 const cache = new Map(); // must be outside of your serverless function handler
 
 const ratelimit = new Ratelimit({
@@ -26,12 +30,24 @@ const ratelimit = new Ratelimit({
   enableProtection: true
 })
 
+async function pipeToStream(request) {
+  const pipeUrl = new URL(request.url);
+  if (!pipeUrl.pathname.startsWith('/pipe/')) return null;
+  const streamUrl = pipeUrl.href.replace('/pipe/', '/stream/');
+  return fetch(streamUrl, { method: request.method, redirect: 'manual' });
+}
+
 export default async function middleware(request) {
   // You could alternatively limit based on user ID or similar
   const ip = ipAddress(request) || '127.0.0.1';
   const { success, reset } = await ratelimit.limit(ip);
 
-  return success ? next() : Response.json(
+  if (success) {
+    const streamResponse = await pipeToStream(request);
+    return streamResponse ?? next();
+  }
+  else {
+    return Response.json(
     { message: `Try after ${(reset - Date.now())/1000} seconds`, error: "Too Many Requests", statusCode: 429 },
     {
       status: 429,
@@ -39,4 +55,5 @@ export default async function middleware(request) {
       headers: {"Access-Control-Allow-Origin":"*"}
     },
   )
+  }
 }
