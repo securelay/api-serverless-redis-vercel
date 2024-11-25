@@ -291,47 +291,35 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
     }    
 })
 
-fastify.get('/stream/:key', async (request, reply) => {
+const streamHandler = async (request, reply) => {
   const { key } = request.params;
   try {
-    const token = await helper.streamToken(key);
+    let recvBool;
+    switch (request.method) {
+      case 'POST': // Using fallthrough! POST and PUT cases run the same code.
+      case 'PUT':
+        recvBool = false;
+        break;
+      case 'GET':
+        recvBool = true;
+        break;
+      default:
+        throw new Error('Unsupported Method');
+    }
+    const token = await helper.streamToken(key, recvBool);
     reply.redirect('https://ppng.io/' + token, 307);
   } catch (err) {
     if (err.message == 'Invalid Key') {
       callUnauthorized(reply, 'Provided key is invalid');
+    } else if (err.message == 'Unsupported Method') {
+      callBadRequest(reply, 'Unsupported method');
     } else {
-            callInternalServerError(reply, err);
+      callInternalServerError(reply, err);
     }
   }
-})
+}
 
-fastify.put('/stream/:key', async (request, reply) => {
-  const { key } = request.params;
-  try {
-    const token = await helper.streamToken(key, false);
-    reply.redirect('https://ppng.io/' + token, 307);
-  } catch (err) {
-    if (err.message == 'Invalid Key') {
-      callUnauthorized(reply, 'Provided key is invalid');
-    } else {
-            callInternalServerError(reply, err);
-    }
-  }
-})
-
-fastify.post('/stream/:key', async (request, reply) => {
-  const { key } = request.params;
-  try {
-    const token = await helper.streamToken(key, false);
-    reply.redirect('https://ppng.io/' + token, 307);
-  } catch (err) {
-    if (err.message == 'Invalid Key') {
-      callUnauthorized(reply, 'Provided key is invalid');
-    } else {
-            callInternalServerError(reply, err);
-    }
-  }
-})
+fastify.all('/stream/:key', streamHandler);
 
 export default async function handler(req, res) {
   await fastify.ready();

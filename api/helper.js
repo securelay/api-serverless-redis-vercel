@@ -228,7 +228,7 @@ export async function streamToken(privateOrPublicKey, receive=true){
   Promise.all([
     redisData.lpush(dbKey, token),
     redisData.expire(dbKey, streamTimeout),
-    redisData.ltrim(dbKey, 0, streamCount)
+    redisData.ltrim(dbKey, 0, streamCount - 1)
   ])
   return token;
 }

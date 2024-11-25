@@ -13,8 +13,10 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 
 export const config = {
-  matcher: ['/public/:path*', '/private/:path*', '/keys/:path*', '/pipe/:path*']
+  matcher: ['/public/:path*', '/private/:path*', '/keys/:path*', '/pipe/:path*', '/stream/:path*']
 };
+
+const middlewareSig = process.env.SECRET; // Secret known to middleware only
 
 const cache = new Map(); // must be outside of your serverless function handler
 
@@ -30,20 +32,30 @@ const ratelimit = new Ratelimit({
   enableProtection: true
 })
 
+// Forwards requests at path /pipe/* to /stream/* in index.js after trimming the request body and headers
+// and returns the response. This is done in middleware.js because, unlike index.js, middleware.js doesn't have
+// problems with the `Expect: 100-continue` header sent by `curl -T- <url>`. middleware.js also doesn't read the
+// request body. index.js also has a set bodyLimit which is incompatible with payloads at /pipe/* of arbitrary size.
+// /stream/ path is exposed only to middleware.
+// For requests not at path /pipe/*, returns null.
 async function pipeToStream(request) {
   const pipeUrl = new URL(request.url);
   if (!pipeUrl.pathname.startsWith('/pipe/')) return null;
   const streamUrl = pipeUrl.href.replace('/pipe/', '/stream/');
-  return fetch(streamUrl, { method: request.method, redirect: 'manual' });
+  return fetch(streamUrl, { method: request.method, headers: { 'x-middleware' : middlewareSig }, redirect: 'manual' });
 }
 
 export default async function middleware(request) {
-  // You could alternatively limit based on user ID or similar
+  const fromMiddleware = request.headers.get('x-middleware') === middlewareSig;
+
+  // You could alternatively rate-limit based on user ID or similar
   const ip = ipAddress(request) || '127.0.0.1';
-  const { success, reset } = await ratelimit.limit(ip);
+  // For requests from middleware, no rate-limiting is necessary
+  const { success, reset } = fromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ip);
 
   if (success) {
     const streamResponse = await pipeToStream(request);
+    // For non-pipe requests, streamResponse is null.
     return streamResponse ?? next();
   }
   else {
