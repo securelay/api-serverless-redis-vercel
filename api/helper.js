@@ -12,11 +12,24 @@ const sigLen = parseInt(process.env.SIG_LEN);
 const hashLen = parseInt(process.env.HASH_LEN);
 const ttl = parseInt(process.env.TTL);
 const cacheTtl = parseInt(process.env.CACHE_TTL);
+const streamTimeout = parseInt(process.env.STREAM_TIMEOUT);
+const maxStreamCount = parseInt(process.env.MAX_STREAM_COUNT);
+
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
                 oneToMany: "o2m:",
                 oneToOne: "o2o:",
-                cache: "cache:"
+                cache: "cache:",
+                stream: {
+                  public: {
+                    send: "pipePubSend:",
+                    receive: "pipePubRecv:"
+                  },
+                  private: {
+                    send: "pipePrivSend:",
+                    receive: "pipePrivRecv:"
+                  }
+                }
             }
 // Redis client for user database
 const redisData = new Redis({
@@ -44,9 +57,9 @@ function sign(str){
     return createHmac('md5', secret).update(str).digest('base64url').substring(0,sigLen);
 }
 
-//Brief: Return random base64url string of given length
+// Brief: Return random base64url string of given length
 function randStr(len = hashLen){
-  const byteSize = Math.ceil(len*6/8);
+  const byteSize = Math.ceil(len*6/8); // base64 char is 6 bit, byte is 8
   const buff = Buffer.alloc(byteSize);
   getRandomValues(buff);
   return buff.toString('base64url').substring(0,len);
@@ -56,7 +69,7 @@ export function id(){
     return sign('id');
 }
 
-export function validate(key){
+export function validate(key, silent=true){
     const sig = key.substring(0, sigLen);
     const hash = key.substring(sigLen);
     if (sig === sign(hash + 'public')){
@@ -64,6 +77,7 @@ export function validate(key){
     } else if (sig === sign(hash + 'private')){
         return 'private';
     } else {
+        if (!silent) throw new Error('Invalid Key');
         return false;
     }
 }
@@ -198,4 +212,23 @@ export async function oneToOneTTL(privateKey, key){
       redisData.ttl(dbKey)
     ])
     return {ttl: bool ? ttl : 0};
+}
+
+// Tokens are stored in LIFO stacks. Old and unused tokens are trimmed.
+export async function streamToken(privateOrPublicKey, receive=true){
+  const type = validate(privateOrPublicKey, false);
+  const typeComplement = (type == 'private') ? 'public' : 'private';
+  const publicKey = genPublicKey(privateOrPublicKey);
+  const mode = receive ? "receive" : "send";
+  const modeComplement = receive ? "send" : "receive";
+  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKey);
+  if (existing) return existing;
+  const token = randStr();
+  const dbKey = dbKeyPrefix.stream[type][mode] + publicKey;
+  Promise.all([
+    redisData.lpush(dbKey, token),
+    redisData.expire(dbKey, streamTimeout),
+    redisData.ltrim(dbKey, 0, maxStreamCount - 1)
+  ])
+  return token;
 }
