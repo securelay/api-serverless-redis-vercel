@@ -13,7 +13,7 @@ const hashLen = parseInt(process.env.HASH_LEN);
 const ttl = parseInt(process.env.TTL);
 const cacheTtl = parseInt(process.env.CACHE_TTL);
 const streamTimeout = parseInt(process.env.STREAM_TIMEOUT);
-const streamCount = parseInt(process.env.STREAM_COUNT);
+const maxStreamCount = parseInt(process.env.MAX_STREAM_COUNT);
 
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
@@ -228,7 +228,7 @@ export async function streamToken(privateOrPublicKey, receive=true){
   Promise.all([
     redisData.lpush(dbKey, token),
     redisData.expire(dbKey, streamTimeout),
-    redisData.ltrim(dbKey, 0, streamCount - 1)
+    redisData.ltrim(dbKey, 0, maxStreamCount - 1)
   ])
   return token;
 }
