@@ -12,10 +12,6 @@ import { next } from '@vercel/edge';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 
-export const config = {
-  matcher: ['/public/:path*', '/private/:path*', '/keys/:path*', '/pipe/:path*', '/stream/:path*']
-};
-
 const middlewareSig = process.env.SECRET; // Secret known to middleware only
 
 const cache = new Map(); // must be outside of your serverless function handler
