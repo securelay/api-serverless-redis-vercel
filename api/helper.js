@@ -222,11 +222,17 @@ export async function streamToken(privateOrPublicKey, receive=true){
   const mode = receive ? "receive" : "send";
   const modeComplement = receive ? "send" : "receive";
   const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKey);
-  if (existing) return existing;
+  const timeNow = Math.round(Date.now()/1000);
+  if (existing) {
+    const [token, timestamp] = existing.split('@');
+    // Expired unused tokens are possible as adding new tokens refreshes the expiry of the entire list (see below).
+    // Return token that is not expired.
+    if ((timeNow - timestamp) < streamTimeout) return token;
+  }
   const token = randStr();
   const dbKey = dbKeyPrefix.stream[type][mode] + publicKey;
-  Promise.all([
-    redisData.lpush(dbKey, token),
+  await Promise.all([
+    redisData.lpush(dbKey, token + '@' + timeNow),
     redisData.expire(dbKey, streamTimeout),
     redisData.ltrim(dbKey, 0, maxStreamCount - 1)
   ])
