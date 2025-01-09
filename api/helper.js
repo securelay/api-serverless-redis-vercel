@@ -238,3 +238,40 @@ export async function streamToken(privateOrPublicKey, receive=true){
   ])
   return token;
 }
+
+export function OneSignalID(app){
+  return process.env[`ONESIGNAL_APP_ID_${app.toUpperCase()}`];
+}
+
+export function OneSignalKey(app){
+  return process.env[`ONESIGNAL_API_KEY_${app.toUpperCase()}`];
+}
+
+// Web-push data using OneSignal and registered app details.
+// Parameter `data` must be valid JSON object, but not an array!
+export async function OneSignalSendPush(app, externalID, data=null){
+  const OneSignalAPIKey = OneSignalKey(app);
+  const OneSignalAppID = OneSignalID(app);
+  const appObj = await fetch(`https://securelay.github.io/apps/${app.toLowerCase()}.json`)
+    .then((response) => response.json())
+    .catch((err) => null);
+  if (! (OneSignalAPIKey && OneSignalAppID && appObj)) throw new Error('App is not recognized');
+  return fetch('https://api.onesignal.com/notifications?c=push', {
+    method: 'POST',
+    headers: {
+      Authorization: `Key ${OneSignalAPIKey}`,
+      'Content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      app_id: OneSignalAppID,
+      include_aliases: {external_id: [externalID]},
+      target_channel: 'push',
+      contents: {en: appObj.webPush.message},
+      isAnyWeb: true,
+      web_push_topic: 'public post',
+      mutable_content: true,
+      enable_frequency_cap: false,
+      data: data
+    })  
+  }).then((res) => res.json())
+}

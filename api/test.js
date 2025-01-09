@@ -6,6 +6,9 @@ Run: node --env-file=.env test.js
 import * as helper from './helper.js';
 
 
+console.log('Sending OneSignal Push for formonit app...OneSignal API returns:', 
+  await helper.OneSignalSendPush('formonit', '6kI2oBt2dN', {"hello":"there"}));
+
 const key = helper.genKeyPair();
 
 console.log(JSON.stringify(key));

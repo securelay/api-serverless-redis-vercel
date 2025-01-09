@@ -40,7 +40,17 @@ fastify.get('/', (request, reply) => {
 })
 
 fastify.get('/id', (request, reply) => {
-    reply.send(helper.id());
+    const app = request.query.app;
+    if (app == null) {
+      reply.send(helper.id());
+    } else {
+      const OneSignalID = helper.OneSignalID(app);
+      if (OneSignalID) {
+        reply.send(OneSignalID);
+      } else {
+        reply.callNotFound();
+      }
+    }
 })
 
 fastify.get('/keys', (request, reply) => {
@@ -63,10 +73,12 @@ fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
+    const app = request.query.app;
+    const data = request.body;
+
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
 
-        const data = JSON.stringify(request.body);
         let webhookUsed;
 
         // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
@@ -78,7 +90,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
                 method: "POST",
                 redirect: "follow",
                 headers: { "Content-type": "application/json" },
-                body: data,
+                body: JSON.stringify(data),
                 signal: AbortSignal.timeout(webhookTimeout)
             }).then((response) => {
                 if (! response.ok) throw new Error(response.status);
@@ -93,6 +105,8 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             ])
         }
         
+        if (app) await helper.OneSignalSendPush(app, publicKey, data).catch((err) => {});
+
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: Boolean(webhookUsed)});
         } else {
@@ -108,7 +122,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
         } else {
             reply.redirect(redirectOnErr, 303);
         }
-    }    
+    }
 })
 
 fastify.get('/private/:privateKey', async (request, reply) => {
