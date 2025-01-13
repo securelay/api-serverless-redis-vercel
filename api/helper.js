@@ -121,6 +121,13 @@ export function genKeyPair(seed = randomUUID()){
     return {private: privateKey, public: publicKey};
 }
 
+// Add metadata to payload (which must be a JSON object)
+export function decoratePayload(payload){
+  // Idempotency_key to uniquely identify a payload
+  const id = randStr();
+  return {id: id, data: payload};
+}
+
 export async function publicProduce(publicKey, data){
     const dbKey = dbKeyPrefix.manyToOne + publicKey;
     return Promise.all([

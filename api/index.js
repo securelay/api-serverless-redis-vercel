@@ -73,13 +73,13 @@ fastify.post('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-    const app = request.query.app;
-    const data = request.body;
 
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
 
-        let webhookUsed;
+        const app = request.query.app;
+        const data = helper.decoratePayload(request.body);
+        let webhookUsed = false;
 
         // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
         try {
@@ -97,7 +97,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
                 return response.text();
             })
             
-            webhookUsed = webhook;
+            webhookUsed = true;
         } catch (err) {
             await Promise.all([
               helper.publicProduce(publicKey, data),
@@ -105,10 +105,10 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             ])
         }
         
-        if (app) await helper.OneSignalSendPush(app, publicKey, data).catch((err) => {});
+        if (app) await helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {});
 
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: Boolean(webhookUsed)});
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: webhookUsed});
         } else {
             reply.redirect(redirectOnOk, 303);
         }
@@ -172,7 +172,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const redirectOnErr = request.query.err;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        await helper.privateProduce(privateKey, JSON.stringify(request.body));
+        await helper.privateProduce(privateKey, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
@@ -246,7 +246,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     try {
         if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
-        await helper.oneToOneProduce(privateKey, key, JSON.stringify(request.body));
+        await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
