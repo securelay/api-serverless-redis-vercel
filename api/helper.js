@@ -125,7 +125,7 @@ export function genKeyPair(seed = randomUUID()){
 export function decoratePayload(payload){
   // Idempotency_key to uniquely identify a payload
   const id = randStr();
-  return {id: id, data: payload};
+  return {id: id, time: Date.now(), data: payload};
 }
 
 export async function publicProduce(publicKey, data){
