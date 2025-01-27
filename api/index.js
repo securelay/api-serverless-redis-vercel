@@ -1,6 +1,7 @@
 import * as helper from './helper.js';
 import Fastify from 'fastify';
 
+const endpointID = helper.id();
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 const fieldLimit = parseInt(process.env.FIELDLIMIT);
 const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT);
@@ -42,7 +43,7 @@ fastify.get('/', (request, reply) => {
 fastify.get('/id', (request, reply) => {
     const app = request.query.app;
     if (app == null) {
-      reply.send(helper.id());
+      reply.send(endpointID);
     } else {
       const OneSignalID = helper.OneSignalID(app);
       if (OneSignalID) {
@@ -172,7 +173,8 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const redirectOnErr = request.query.err;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        await helper.privateProduce(privateKey, JSON.stringify(helper.decoratePayload(request.body)));
+        //await helper.privateProduce(privateKey, JSON.stringify(helper.decoratePayload(request.body)));
+        if (! await helper.githubPushJSON(privateKey, request.body)) throw 500;
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
@@ -195,7 +197,8 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        await helper.privateDelete(privateKey);
+        //await helper.privateDelete(privateKey);
+        if (! await helper.githubPushJSON(privateKey, null, true)) throw 500;
         reply.code(204);
     } catch (err) {
         if (err == 401) {
@@ -210,7 +213,8 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        await helper.privateRefresh(privateKey);
+        //await helper.privateRefresh(privateKey);
+        if (! await helper.githubPushJSON(privateKey)) throw 500;
         reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
     } catch (err) {
         if (err == 401) {
@@ -225,9 +229,10 @@ fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
-        const data = await helper.publicConsume(publicKey);
-        if (!data) throw 404;
-        reply.send(data);
+        //const data = await helper.publicConsume(publicKey);
+        //if (!data) throw 404;
+        //reply.send(data);
+        reply.redirect(`https://securelay.github.io/jsonbin/${endpointID}/${publicKey}.json`, 301);
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Public');
