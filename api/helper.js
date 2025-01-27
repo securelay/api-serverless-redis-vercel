@@ -291,18 +291,41 @@ export async function OneSignalSendPush(app, externalID, data=null){
 }
 
 // Push JSON (object) to be stored at https://securelay.github.io/jsonbin/{id}/{publicKey}.json
-// Do not pass JSON in order to delete existing data.
+// The function adds metadata using decoratePayload() above.
+// Do not pass JSON in order to touch existing data (i.e. update its timestamp).
+// Pass null as `json` and true as `remove` for removing the stored data.
 // Returns true if data is updated or deleted, false otherwise.
 // Ref: https://github.com/octokit/plugin-create-or-update-text-file.js/
-export async function githubPush(privateKey, json=null){
+export async function githubPushJSON(privateKey, json=null, remove=false){
   const publicKey = genPublicKey(privateKey);
   const path = id() + '/' + publicKey + '.json';
+  const touch = Boolean(!(json || remove));
+  let content, mode;
+  
+  if (touch) {
+    // Just update timestamp in metadata when `touch` is true;
+    mode = 'touched';
+    content = ({exists, content}) => {
+      if (!exists) return null;
+      const json = JSON.parse(content);
+      json.time = Date.now();
+      return JSON.stringify(json);
+    }
+  } else if (json === null) {
+    mode = 'deleted';
+    content = null;
+  } else {
+    mode = 'updated';
+    content = JSON.stringify(decoratePayload(json));
+  }
+  
   const { updated, deleted } = await octokit.createOrUpdateTextFile({
     owner: "securelay",
     repo: "jsonbin",
     path: path,
-    content: json ? JSON.stringify(json) : null,
-    message: (json ? 'updated' : 'deleted') + ' ' + path,
+    content: content,
+    message: mode + ' ' + path,
   });
+
   return updated || deleted;
 }
