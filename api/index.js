@@ -229,10 +229,13 @@ fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
+        
         //const data = await helper.publicConsume(publicKey);
         //if (!data) throw 404;
         //reply.send(data);
-        reply.redirect(`https://securelay.github.io/jsonbin/${endpointID}/${publicKey}.json`, 301);
+        
+        //reply.redirect(`https://securelay.github.io/jsonbin/${endpointID}/${publicKey}.json`, 301);
+        reply.redirect(`https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}/${publicKey}.json`, 301);
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Public');
