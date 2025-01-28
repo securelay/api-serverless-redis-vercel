@@ -6,6 +6,8 @@ https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 import { hash as cryptoHash, createHmac, getRandomValues, randomUUID } from 'node:crypto';
 import { Buffer } from "node:buffer";
 import { Redis } from '@upstash/redis';
+import { Octokit } from '@octokit/core';
+import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
 
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
@@ -31,6 +33,7 @@ const dbKeyPrefix = {
                   }
                 }
             }
+
 // Redis client for user database
 const redisData = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -45,6 +48,10 @@ const redisRateLimit = new Redis({
   latencyLogging: false,
   enableAutoPipelining: true
 })
+
+// Setup Octokit for accessing the GitHub API
+const MyOctokit = Octokit.plugin(createOrUpdateTextFile);
+const octokit = new MyOctokit({ auth: process.env.GITHUB_PAT });
 
 function hash(str){
     return cryptoHash('md5', str, 'base64url').substring(0,hashLen);
@@ -281,4 +288,44 @@ export async function OneSignalSendPush(app, externalID, data=null){
       data: data
     })  
   }).then((res) => res.json())
+}
+
+// Push JSON (object) to be stored at https://securelay.github.io/jsonbin/{id}/{publicKey}.json
+// The function adds metadata using decoratePayload() above.
+// Do not pass JSON in order to touch existing data (i.e. update its timestamp).
+// Pass null as `json` and true as `remove` for removing the stored data.
+// Returns true if data is updated or deleted, false otherwise.
+// Ref: https://github.com/octokit/plugin-create-or-update-text-file.js/
+export async function githubPushJSON(privateKey, json=null, remove=false){
+  const publicKey = genPublicKey(privateKey);
+  const path = id() + '/' + publicKey + '.json';
+  const touch = Boolean(!(json || remove));
+  let content, mode;
+  
+  if (touch) {
+    // Just update timestamp in metadata when `touch` is true;
+    mode = 'touched';
+    content = ({exists, content}) => {
+      if (!exists) return null;
+      const json = JSON.parse(content);
+      json.time = Date.now();
+      return JSON.stringify(json);
+    }
+  } else if (json === null) {
+    mode = 'deleted';
+    content = null;
+  } else {
+    mode = 'updated';
+    content = JSON.stringify(decoratePayload(json));
+  }
+  
+  const { updated, deleted } = await octokit.createOrUpdateTextFile({
+    owner: "securelay",
+    repo: "jsonbin",
+    path: path,
+    content: content,
+    message: mode + ' ' + path,
+  });
+
+  return updated || deleted;
 }
