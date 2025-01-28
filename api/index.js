@@ -2,6 +2,7 @@ import * as helper from './helper.js';
 import Fastify from 'fastify';
 
 const endpointID = helper.id();
+const cdnUrlBase = `https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}`;
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 const fieldLimit = parseInt(process.env.FIELDLIMIT);
 const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT);
@@ -176,7 +177,12 @@ fastify.post('/private/:privateKey', async (request, reply) => {
         //await helper.privateProduce(privateKey, JSON.stringify(helper.decoratePayload(request.body)));
         if (! await helper.githubPushJSON(privateKey, request.body)) throw 500;
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+            reply.send({
+              message: "Done",
+              error: "Ok",
+              statusCode: reply.statusCode,
+              cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
+            });
         } else {
             reply.redirect(redirectOnOk, 303);
         }
@@ -215,7 +221,12 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
         if (helper.validate(privateKey) !== 'private') throw 401;
         //await helper.privateRefresh(privateKey);
         if (! await helper.githubPushJSON(privateKey)) throw 500;
-        reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+        reply.send({
+          message: "Done",
+          error: "Ok",
+          statusCode: reply.statusCode,
+          cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
+        });
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
@@ -235,7 +246,7 @@ fastify.get('/public/:publicKey', async (request, reply) => {
         //reply.send(data);
         
         //reply.redirect(`https://securelay.github.io/jsonbin/${endpointID}/${publicKey}.json`, 301);
-        reply.redirect(`https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}/${publicKey}.json`, 301);
+        reply.redirect(`${cdnUrlBase}/${publicKey}.json`, 301);
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Public');
