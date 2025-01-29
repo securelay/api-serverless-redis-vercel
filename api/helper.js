@@ -215,7 +215,7 @@ export async function publicConsume(publicKey){
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
-    const field = {[key]: data};
+    const field = {[hash(key)]: data};
     return Promise.all([
       redisData.hset(dbKey, field),
       redisData.expire(dbKey, ttl)
@@ -224,7 +224,7 @@ export async function oneToOneProduce(privateKey, key, data){
 
 export async function oneToOneConsume(publicKey, key){
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
-    const field = key;
+    const field = hash(key);
     const atomicTransaction = redisData.multi();
     atomicTransaction.hget(dbKey, field);
     atomicTransaction.hdel(dbKey, field);
@@ -235,7 +235,7 @@ export async function oneToOneConsume(publicKey, key){
 export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
-    const field = key;
+    const field = hash(key);
     const [ bool, ttl ] = await Promise.all([
       redisData.hexists(dbKey, field),
       redisData.ttl(dbKey)

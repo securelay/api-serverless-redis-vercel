@@ -7,7 +7,6 @@ const cdnUrlBase = `https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpoin
 //const cdnUrlBase = `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
 
 const bodyLimit = parseInt(process.env.BODYLIMIT);
-const fieldLimit = parseInt(process.env.FIELDLIMIT);
 const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT);
 
 // Impose content-length limit
@@ -298,7 +297,6 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
     try {
-        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
@@ -324,7 +322,6 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
 fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
     try {
-        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(publicKey) !== 'public') throw 401;
         const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw 404;
@@ -345,7 +342,6 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
 fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     try {
-        if (key.substr(0,fieldLimit) !== key) throw 400;
         if (helper.validate(privateKey) !== 'private') throw 401;
         return helper.oneToOneTTL(privateKey, key);
     } catch (err) {
