@@ -129,10 +129,23 @@ export function genKeyPair(seed = randomUUID()){
 }
 
 // Add metadata to payload (which must be a JSON object)
-export function decoratePayload(payload){
-  // Idempotency_key to uniquely identify a payload
-  const id = randStr();
-  return {id: id, time: Date.now(), data: payload};
+// Some metadata, such as `id` to uniquely identify a payload and timestamp, are generated
+// Other metadata may be provided as the `fields` JSON object.
+// `passwd`, if provided, is hashed and stored as metadata property `__lock__`.
+export function decoratePayload(payload, fields={}, passwd=null){
+  const generatedMeta = {id: randStr(), time: Date.now()};
+  const lockMeta = {};
+  if (passwd) lockMeta['__lock__'] = hash(passwd);
+  return {...generatedMeta, ...fields, ...lockMeta, data: payload};
+}
+
+// Removes `__lock__` property from json object after matching its value against provided `passwd`.
+export function unlockJSON(json, passwd=null){
+  if (! '__lock__' in json) return json;
+  if (passwd && (json['__lock__'] === hash(passwd))) {
+    delete(json['__lock__']);
+    return json;
+  }
 }
 
 export async function publicProduce(publicKey, data){
@@ -199,8 +212,7 @@ export async function publicConsume(publicKey){
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
-    let field = {};
-    field[key] = data;
+    const field = {[key]: data};
     return Promise.all([
       redisData.hset(dbKey, field),
       redisData.expire(dbKey, ttl)
