@@ -3,6 +3,9 @@ import Fastify from 'fastify';
 
 const endpointID = helper.id();
 const cdnUrlBase = `https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}`;
+//const cdnUrlBase = `https://securelay.github.io/jsonbin/${endpointID}`;
+//const cdnUrlBase = `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
+
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 const fieldLimit = parseInt(process.env.FIELDLIMIT);
 const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT);
@@ -27,6 +30,10 @@ fastify.register(import('@fastify/formbody'))
 
 const callUnauthorized = function(reply, msg){
     reply.code(401).send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
+}
+
+const callForbidden = function(reply, msg){
+    reply.code(403).send({message: msg, error: "Forbidden", statusCode: reply.statusCode});
 }
 
 const callBadRequest = function(reply, msg){
@@ -119,7 +126,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Public');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -163,7 +170,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -172,16 +179,25 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
+    const passwd = request.query.password;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        //await helper.privateProduce(privateKey, JSON.stringify(helper.decoratePayload(request.body)));
-        if (! await helper.githubPushJSON(privateKey, request.body)) throw 500;
+
+        const cdn = {};
+        if (passwd == null) {
+          if (! await helper.githubPushJSON(privateKey, request.body)) throw 500;
+          cdn['cdn'] = `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`;
+        } else {
+          const data = JSON.stringify(helper.decoratePayload(request.body, {}, passwd));
+          await helper.privateProduce(privateKey, data);
+        }
+
         if (redirectOnOk == null) {
             reply.send({
               message: "Done",
               error: "Ok",
               statusCode: reply.statusCode,
-              cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
+              ...cdn
             });
         } else {
             reply.redirect(redirectOnOk, 303);
@@ -191,7 +207,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
             if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -201,59 +217,78 @@ fastify.post('/private/:privateKey', async (request, reply) => {
 
 fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
+    const passwdPresent = 'password' in request.query;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        //await helper.privateDelete(privateKey);
-        if (! await helper.githubPushJSON(privateKey, null, true)) throw 500;
+        if (passwdPresent) {
+          await helper.privateDelete(privateKey);
+        } else {
+          if (! await helper.githubPushJSON(privateKey, null, true)) throw 500;
+        }
         reply.code(204);
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }
 })
 
 fastify.patch('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
+    const passwdPresent = 'password' in request.query;
     try {
         if (helper.validate(privateKey) !== 'private') throw 401;
-        //await helper.privateRefresh(privateKey);
-        if (! await helper.githubPushJSON(privateKey)) throw 500;
+
+        const cdn = {};
+        if (passwdPresent) {
+          await helper.privateRefresh(privateKey);
+        } else {
+          if (! await helper.githubPushJSON(privateKey)) throw 500;
+          cdn['cdn'] = `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`;
+        }
+
         reply.send({
           message: "Done",
           error: "Ok",
           statusCode: reply.statusCode,
-          cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
+          ...cdn
         });
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }
 })
 
 fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
+    const passwd = request.query.password;
     try {
         if (helper.validate(publicKey) !== 'public') throw 401;
         
-        //const data = await helper.publicConsume(publicKey);
-        //if (!data) throw 404;
-        //reply.send(data);
+        if (passwd == null) {
+          reply.redirect(`${cdnUrlBase}/${publicKey}.json`, 301);
+        } else {
+          const data = await helper.publicConsume(publicKey);
+          if (!data) throw 404;
+          const unlockedData = helper.unlockJSON(data, passwd);
+          if (!unlockedData) throw 403;
+          reply.send(unlockedData);
+        }
         
-        //reply.redirect(`https://securelay.github.io/jsonbin/${endpointID}/${publicKey}.json`, 301);
-        reply.redirect(`${cdnUrlBase}/${publicKey}.json`, 301);
     } catch (err) {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Public');
+        } else if (err == 403) {
+            callForbidden(reply, 'Provided password is wrong');
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -278,7 +313,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
             } else if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -302,7 +337,7 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -319,7 +354,7 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
         } else if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -347,7 +382,7 @@ const streamHandler = async (request, reply) => {
     } else if (err.message == 'Unsupported Method') {
       callBadRequest(reply, 'Unsupported method');
     } else {
-      callInternalServerError(reply, err);
+      callInternalServerError(reply, err.message);
     }
   }
 }

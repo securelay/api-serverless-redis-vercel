@@ -129,10 +129,25 @@ export function genKeyPair(seed = randomUUID()){
 }
 
 // Add metadata to payload (which must be a JSON object)
-export function decoratePayload(payload){
-  // Idempotency_key to uniquely identify a payload
-  const id = randStr();
-  return {id: id, time: Date.now(), data: payload};
+// Some metadata, such as `id` to uniquely identify a payload and timestamp, are generated
+// Other metadata may be provided as the `fields` JSON object.
+// `passwd`, if provided, is hashed and stored as metadata property `__lock__`.
+export function decoratePayload(payload, fields={}, passwd=null){
+  const generatedMeta = {id: randStr(), time: Date.now()};
+  const lockMeta = {};
+  // Check if passwd is not null or undefined.
+  // Note: check passes even if passwd is empty string as '' can be hashed.
+  if (passwd != null) lockMeta['__lock__'] = hash(passwd);
+  return {...generatedMeta, ...fields, ...lockMeta, data: payload};
+}
+
+// Removes `__lock__` property from json object after matching its value against provided `passwd`.
+export function unlockJSON(json, passwd){
+  if (! '__lock__' in json) return json;
+  if (json['__lock__'] === hash(passwd)) {
+    delete(json['__lock__']);
+    return json;
+  }
 }
 
 export async function publicProduce(publicKey, data){
@@ -175,32 +190,32 @@ export async function privateStats(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey;
     const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey;
-    const [ countConsume, ttlConsume, ttlPublish ] = await Promise.all([
+    const [ countConsume, ttlConsume ] = await Promise.all([
       redisData.llen(dbKeyConsume),
-      redisData.ttl(dbKeyConsume),
-      redisData.ttl(dbKeyPublish)
+      redisData.ttl(dbKeyConsume)
     ])
     return {
-      consume: {
         count: countConsume,
         ttl: ttlConsume < 0 ? 0 : ttlConsume
-        },
-      publish: {
-        ttl: ttlPublish < 0 ? 0 : ttlPublish
-        }
-      };
+    };
 }
 
+// Demand for data also refreshes its expiry
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
-    return redisData.get(dbKey);
+    // Ideally there should be getex() in Upstash's Redis SDK.
+    // Until it's available, we make do with pipelining as follows.
+    const [ data, _ ] = await Promise.all([
+      redisData.get(dbKey),
+      redisData.expire(dbKey, ttl)
+    ])
+    return data;
 }
 
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
-    let field = {};
-    field[key] = data;
+    const field = {[key]: data};
     return Promise.all([
       redisData.hset(dbKey, field),
       redisData.expire(dbKey, ttl)
