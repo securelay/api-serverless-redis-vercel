@@ -126,7 +126,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Public');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -170,7 +170,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -207,7 +207,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
             if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -230,7 +230,7 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }
 })
@@ -259,7 +259,7 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
         if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }
 })
@@ -275,7 +275,7 @@ fastify.get('/public/:publicKey', async (request, reply) => {
         } else {
           const data = await helper.publicConsume(publicKey);
           if (!data) throw 404;
-          const unlockedData = helper.unlockJSON(JSON.parse(data), passwd);
+          const unlockedData = helper.unlockJSON(data, passwd);
           if (!unlockedData) throw 403;
           reply.send(unlockedData);
         }
@@ -288,7 +288,7 @@ fastify.get('/public/:publicKey', async (request, reply) => {
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -313,7 +313,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
             } else if (err == 401) {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else {
-                callInternalServerError(reply, err);
+                callInternalServerError(reply, err.message);
             }
         } else {
             reply.redirect(redirectOnErr, 303);
@@ -337,7 +337,7 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
         } else if (err == 404) {
             reply.callNotFound();
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -354,7 +354,7 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
         } else if (err == 401) {
             callUnauthorized(reply, 'Provided key is not Private');
         } else {
-            callInternalServerError(reply, err);
+            callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -382,7 +382,7 @@ const streamHandler = async (request, reply) => {
     } else if (err.message == 'Unsupported Method') {
       callBadRequest(reply, 'Unsupported method');
     } else {
-      callInternalServerError(reply, err);
+      callInternalServerError(reply, err.message);
     }
   }
 }
