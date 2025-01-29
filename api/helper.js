@@ -200,9 +200,16 @@ export async function privateStats(privateKey){
     };
 }
 
+// Demand for data also refreshes its expiry
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey;
-    return redisData.get(dbKey);
+    // Ideally there should be getex() in Upstash's Redis SDK.
+    // Until it's available, we make do with pipelining as follows.
+    const [ data, _ ] = await Promise.all([
+      redisData.get(dbKey),
+      redisData.expire(dbKey, ttl)
+    ])
+    return data;
 }
 
 export async function oneToOneProduce(privateKey, key, data){
