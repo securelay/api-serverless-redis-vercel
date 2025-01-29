@@ -190,20 +190,14 @@ export async function privateStats(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey;
     const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey;
-    const [ countConsume, ttlConsume, ttlPublish ] = await Promise.all([
+    const [ countConsume, ttlConsume ] = await Promise.all([
       redisData.llen(dbKeyConsume),
-      redisData.ttl(dbKeyConsume),
-      redisData.ttl(dbKeyPublish)
+      redisData.ttl(dbKeyConsume)
     ])
     return {
-      consume: {
         count: countConsume,
         ttl: ttlConsume < 0 ? 0 : ttlConsume
-        },
-      publish: {
-        ttl: ttlPublish < 0 ? 0 : ttlPublish
-        }
-      };
+    };
 }
 
 export async function publicConsume(publicKey){
