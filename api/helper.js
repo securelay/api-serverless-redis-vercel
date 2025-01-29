@@ -135,14 +135,16 @@ export function genKeyPair(seed = randomUUID()){
 export function decoratePayload(payload, fields={}, passwd=null){
   const generatedMeta = {id: randStr(), time: Date.now()};
   const lockMeta = {};
-  if (passwd) lockMeta['__lock__'] = hash(passwd);
+  // Check if passwd is not null or undefined.
+  // Note: check passes even if passwd is empty string as '' can be hashed.
+  if (passwd != null) lockMeta['__lock__'] = hash(passwd);
   return {...generatedMeta, ...fields, ...lockMeta, data: payload};
 }
 
 // Removes `__lock__` property from json object after matching its value against provided `passwd`.
-export function unlockJSON(json, passwd=null){
+export function unlockJSON(json, passwd){
   if (! '__lock__' in json) return json;
-  if (passwd && (json['__lock__'] === hash(passwd))) {
+  if (json['__lock__'] === hash(passwd)) {
     delete(json['__lock__']);
     return json;
   }
