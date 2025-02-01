@@ -116,7 +116,7 @@ export function genKeyPair(seed = randomUUID()){
 
 export function cacheSet(privateKey, obj){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.cache + publicKey;
+    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
     // Promise.all below enables both commands to be executed in a single http request (using same pipeline)
     // As Redis is single-threaded, the commands are executed in order
     // See https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
@@ -127,13 +127,13 @@ export function cacheSet(privateKey, obj){
 }
 
 export function cacheGet(publicKey, key){
-    const dbKey = dbKeyPrefix.cache + publicKey;
+    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
     return redisRateLimit.hget(dbKey, key);
 }
 
 export function cacheDel(privateOrPublicKey, key){
     const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + publicKey;
+    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
     return redisRateLimit.hdel(dbKey, key);
 }
 
@@ -160,7 +160,7 @@ export function unlockJSON(json, passwd){
 }
 
 export async function publicProduce(publicKey, data){
-    const dbKey = dbKeyPrefix.manyToOne + publicKey;
+    const dbKey = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
     return Promise.all([
       redisData.rpush(dbKey, data),
       redisData.expire(dbKey, ttl)
@@ -169,7 +169,7 @@ export async function publicProduce(publicKey, data){
 
 export async function privateConsume(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.manyToOne + publicKey;
+    const dbKey = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
     const atomicTransaction = redisData.multi();
     atomicTransaction.lrange(dbKey, 0, -1);
     atomicTransaction.del(dbKey);
@@ -179,26 +179,26 @@ export async function privateConsume(privateKey){
 
 export async function privateProduce(privateKey, data){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
     return redisData.set(dbKey, data, { ex: ttl });
 }
 
 export async function privateDelete(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
     return redisData.del(dbKey);
 }
 
 export async function privateRefresh(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
     return redisData.expire(dbKey, ttl);
 }
 
 export async function privateStats(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey;
-    const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey;
+    const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
+    const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
     const [ countConsume, ttlConsume ] = await Promise.all([
       redisData.llen(dbKeyConsume),
       redisData.ttl(dbKeyConsume)
@@ -211,7 +211,7 @@ export async function privateStats(privateKey){
 
 // Demand for data also refreshes its expiry
 export async function publicConsume(publicKey){
-    const dbKey = dbKeyPrefix.oneToMany + publicKey;
+    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
     // Ideally there should be getex() in Upstash's Redis SDK.
     // Until it's available, we make do with pipelining as follows.
     const [ data, _ ] = await Promise.all([
@@ -223,7 +223,7 @@ export async function publicConsume(publicKey){
 
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
     const field = {[hash(key)]: data};
     // Ideally there should be hexpire() in Upstash's Redis SDK.
     // Until it's available, we expire the containing key as follows.
@@ -234,7 +234,7 @@ export async function oneToOneProduce(privateKey, key, data){
 }
 
 export async function oneToOneConsume(publicKey, key){
-    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
     const field = hash(key);
     const atomicTransaction = redisData.multi();
     atomicTransaction.hget(dbKey, field);
@@ -245,7 +245,7 @@ export async function oneToOneConsume(publicKey, key){
 
 export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + publicKey;
+    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
     const field = hash(key);
     // Ideally there should be httl() in Upstash's Redis SDK.
     // Until it's available, we use ttl of the containing key as follows.
@@ -264,7 +264,7 @@ export async function streamToken(privateOrPublicKey, receive=true){
   const publicKey = genPublicKey(privateOrPublicKey);
   const mode = receive ? "receive" : "send";
   const modeComplement = receive ? "send" : "receive";
-  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKey);
+  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKey.substring(sigLen));
   const timeNow = Math.round(Date.now()/1000);
   if (existing) {
     const [token, timestamp] = existing.split('@');
@@ -273,7 +273,7 @@ export async function streamToken(privateOrPublicKey, receive=true){
     if ((timeNow - timestamp) < streamTimeout) return token;
   }
   const token = randStr();
-  const dbKey = dbKeyPrefix.stream[type][mode] + publicKey;
+  const dbKey = dbKeyPrefix.stream[type][mode] + publicKey.substring(sigLen);
   await Promise.all([
     redisData.lpush(dbKey, token + '@' + timeNow),
     redisData.expire(dbKey, streamTimeout),
