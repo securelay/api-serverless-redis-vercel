@@ -225,6 +225,8 @@ export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     const field = {[hash(key)]: data};
+    // Ideally there should be hexpire() in Upstash's Redis SDK.
+    // Until it's available, we expire the containing key as follows.
     return Promise.all([
       redisData.hset(dbKey, field),
       redisData.expire(dbKey, ttl)
@@ -245,6 +247,8 @@ export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + publicKey;
     const field = hash(key);
+    // Ideally there should be httl() in Upstash's Redis SDK.
+    // Until it's available, we use ttl of the containing key as follows.
     const [ bool, ttl ] = await Promise.all([
       redisData.hexists(dbKey, field),
       redisData.ttl(dbKey)
@@ -253,6 +257,7 @@ export async function oneToOneTTL(privateKey, key){
 }
 
 // Tokens are stored in LIFO stacks. Old and unused tokens are trimmed.
+// Timestamps are stored with the tokens using string concatenation
 export async function streamToken(privateOrPublicKey, receive=true){
   const type = validate(privateOrPublicKey, false);
   const typeComplement = (type == 'private') ? 'public' : 'private';
