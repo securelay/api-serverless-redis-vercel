@@ -83,7 +83,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
     const redirectOnErr = request.query.err;
 
     try {
-        if (helper.validate(publicKey) !== 'public') throw 401;
+        if (!helper.assert(publicKey, 'public')) throw 401;
 
         const app = request.query.app;
         const data = helper.decoratePayload(request.body);
@@ -142,7 +142,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
     webhookHandler = statsHandler = dataHandler = () => null; // default
 
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
         if (webhook == null) {
             webhookHandler = () => helper.cacheDel(privateKey, 'hook');
         } else {
@@ -180,7 +180,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const redirectOnErr = request.query.err;
     const passwd = request.query.password;
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
 
         const cdn = {};
         if (passwd == null) {
@@ -218,7 +218,7 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const passwdPresent = 'password' in request.query;
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
         if (passwdPresent) {
           await helper.privateDelete(privateKey);
         } else {
@@ -238,7 +238,7 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const passwdPresent = 'password' in request.query;
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
 
         const cdn = {};
         if (passwdPresent) {
@@ -267,7 +267,7 @@ fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
     const passwd = request.query.password;
     try {
-        if (helper.validate(publicKey) !== 'public') throw 401;
+        if (!helper.assert(publicKey, 'public')) throw 401;
         
         if (passwd == null) {
           reply.redirect(`${cdnUrlBase}/${publicKey}.json`, 301);
@@ -297,7 +297,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
@@ -322,7 +322,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
 fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
     try {
-        if (helper.validate(publicKey) !== 'public') throw 401;
+        if (!helper.assert(publicKey, 'public')) throw 401;
         const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw 404;
         reply.send(data);
@@ -342,7 +342,7 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
 fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     try {
-        if (helper.validate(privateKey) !== 'private') throw 401;
+        if (!helper.assert(privateKey, 'private')) throw 401;
         return helper.oneToOneTTL(privateKey, key);
     } catch (err) {
         if (err == 400) {

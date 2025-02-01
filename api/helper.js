@@ -76,6 +76,7 @@ export function id(){
     return sign('id');
 }
 
+// Check if given key is valid, and if it is, return its type
 export function validate(key, silent=true){
     const sig = key.substring(0, sigLen);
     const hash = key.substring(sigLen);
@@ -89,13 +90,28 @@ export function validate(key, silent=true){
     }
 }
 
+// Assert if given key is of the given type (private | public)
+// This is computationally favorable to the Boolean: validate(key) === type
+export function assert(key, type){
+    const sig = key.substring(0, sigLen);
+    const hash = key.substring(sigLen);
+    return sig === sign(hash + type);
+}
+
 export function genPublicKey(privateOrPublicKey){
-    if (validate(privateOrPublicKey) === 'public') return privateOrPublicKey;
+    if (assert(privateOrPublicKey, 'public')) return privateOrPublicKey;
     const privateKey = privateOrPublicKey;
     const privateHash = privateKey.substring(sigLen);
     const publicHash = hash(privateHash);
     const publicKey = sign(publicHash + 'public') + publicHash;
     return publicKey;
+}
+
+export function genKeyPair(seed = randomUUID()){
+    const privateHash = hash(seed);
+    const privateKey = sign(privateHash + 'private') + privateHash;
+    const publicKey = genPublicKey(privateKey);
+    return {private: privateKey, public: publicKey};
 }
 
 export function cacheSet(privateKey, obj){
@@ -119,13 +135,6 @@ export function cacheDel(privateOrPublicKey, key){
     const publicKey = genPublicKey(privateOrPublicKey);
     const dbKey = dbKeyPrefix.cache + publicKey;
     return redisRateLimit.hdel(dbKey, key);
-}
-
-export function genKeyPair(seed = randomUUID()){
-    const privateHash = hash(seed);
-    const privateKey = sign(privateHash + 'private') + privateHash;
-    const publicKey = genPublicKey(privateKey);
-    return {private: privateKey, public: publicKey};
 }
 
 // Add metadata to payload (which must be a JSON object)

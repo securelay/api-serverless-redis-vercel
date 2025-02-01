@@ -14,9 +14,9 @@ const key = helper.genKeyPair();
 
 console.log(JSON.stringify(key));
 
-console.log('This should show public: ' + helper.validate(key.public));
-console.log('This should show private: ' + helper.validate(key.private));
-console.log('This should show false: ' + helper.validate('random'));
+console.log('This should show public: ', helper.validate(key.public), helper.assert(key.public, 'public'));
+console.log('This should show private: ', helper.validate(key.private), helper.assert(key.private, 'private'));
+console.log('This should show false: ', helper.validate('random'), helper.assert('random', 'private') || helper.assert('random', 'public'));
 
 console.log('Stream token private POST:', await helper.streamToken(key.private, false));
 console.log('Stream token public GET:', await helper.streamToken(key.public));
