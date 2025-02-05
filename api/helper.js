@@ -3,7 +3,7 @@ Refs:
 https://upstash.com/docs/redis/sdks/ts/pipelining/pipeline-transaction
 https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 */
-import { hash as cryptoHash, createHmac, getRandomValues, randomUUID } from 'node:crypto';
+import { hash as cryptoHash, createHmac, getRandomValues } from 'node:crypto';
 import { Buffer } from "node:buffer";
 import { Redis } from '@upstash/redis';
 import { Octokit } from '@octokit/core';
@@ -108,7 +108,8 @@ export function genPublicKey(privateOrPublicKey){
     return publicKey;
 }
 
-export function genKeyPair(seed = randomUUID()){
+// Default seed is ~ 22*6 = 132-bit cryptographically random
+export function genKeyPair(seed = randStr(22)){
     const privateHash = hash(seed);
     const privateKey = sign(privateHash + 'private') + privateHash;
     const publicKey = genPublicKey(privateKey);
@@ -221,13 +222,7 @@ export async function privateStats(privateKey){
 // Demand for data also refreshes its expiry
 export async function publicConsume(publicKey){
     const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
-    // Ideally there should be getex() in Upstash's Redis SDK.
-    // Until it's available, we make do with pipelining as follows.
-    const [ data, _ ] = await Promise.all([
-      redisData.get(dbKey),
-      redisData.expire(dbKey, ttl)
-    ])
-    return data;
+    return redisData.getex(dbKey, { ex: ttl });
 }
 
 export async function oneToOneProduce(privateKey, key, data){
