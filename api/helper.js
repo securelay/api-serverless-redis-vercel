@@ -77,48 +77,58 @@ export function id(){
     return sign('id');
 }
 
-// Check if given key is valid, and if it is, return its type
-export function validate(key, silent=true){
-    const sig = key.substring(0, sigLen);
-    const hash = key.substring(sigLen);
-    if (sig === sign(hash + 'public')){
-        return 'public';
-    } else if (sig === sign(hash + 'private')){
-        return 'private';
-    } else {
-        if (!silent) throw new Error('Invalid Key');
-        return false;
-    }
+// Conversion table for key-type <=> Base64-digit (code)
+// In future, there may be more key types other than private and public.
+// E.g. public keys with read-only / write-only / read+write access.
+const keyTypeCode = { A: 'private', B: 'public' };
+
+// Returns keyTypeCode if arg is keyType, and vice-versa.
+function keyType(arg){
+  if (arg.length === 1) {
+    // arg is a single letter code
+    return keyTypeCode[arg];
+  } else {
+    // arg is a multi-letter(word) type
+    return Object.entries(keyTypeCode).find(([code, type]) => type === arg)[0];
+  }
 }
 
-// Assert if given key is of the given type (private | public)
-// This is computationally favorable to the Boolean: validate(key) === type
-export function assert(key, type){
-    const sig = key.substring(0, sigLen);
-    const hash = key.substring(sigLen);
-    return sig === sign(hash + type);
+// Parse given key into its distinct parts (Returns JSON object).
+// If required part is provided, returns only that part.
+// Also validates key by default, disable with option {validate: false}.
+export function parseKey(key, { validate = true } = {}){
+  const parsed = {};
+  parsed.type = keyType(key[0]);
+  parsed.signature = key.substring(1, sigLen + 1);
+  parsed.random = key.substring(sigLen + 1);
+  if ( validate && parsed.signature !== sign(parsed.random + parsed.type) ) {
+    throw new Error('Invalid Key');
+  }
+  return parsed;
 }
 
-export function genPublicKey(privateOrPublicKey){
-    if (assert(privateOrPublicKey, 'public')) return privateOrPublicKey;
-    const privateKey = privateOrPublicKey;
-    const privateHash = privateKey.substring(sigLen);
-    const publicHash = hash(privateHash);
-    const publicKey = sign(publicHash + 'public') + publicHash;
-    return publicKey;
+// Also validates key by default, disable with option {validate: false}.
+export function genPublicKey(privateOrPublicKey, { validate = true } = {}){
+    const { type, random, signature } = parseKey(privateOrPublicKey, { validate: validate });
+    if (type === 'public') return privateOrPublicKey;
+    // In future, there may be more key types other than private and public.
+    // For valid keys, if any, that can't generate a public key, the following check is needed.
+    if (type !== 'private') return undefined;
+    const publicRandom = hash(random); // Hash private-key's random to get public-key's random
+    return keyType('public') + sign(publicRandom + 'public') + publicRandom;
 }
 
 // Default seed is ~ 22*6 = 132-bit cryptographically random
 export function genKeyPair(seed = randStr(22)){
-    const privateHash = hash(seed);
-    const privateKey = sign(privateHash + 'private') + privateHash;
-    const publicKey = genPublicKey(privateKey);
+    const privateRandom = hash(seed);
+    const privateKey = keyType('private') + sign(privateRandom + 'private') + privateRandom;
+    const publicKey = genPublicKey(privateKey, { validate: false });
     return {private: privateKey, public: publicKey};
 }
 
 export async function cacheSet(privateOrPublicKey, obj){
     const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
     // Promise.all below enables both commands to be executed in a single http request (using same pipeline)
     // As Redis is single-threaded, the commands are executed in order
     // See https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
@@ -131,7 +141,7 @@ export async function cacheSet(privateOrPublicKey, obj){
 // Demand for data also refreshes its expiry
 export async function cacheGet(privateOrPublicKey, key){
     const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
     return Promise.all([
       redisRateLimit.hget(dbKey, key),
       redisRateLimit.expire(dbKey, cacheTtl)
@@ -140,7 +150,7 @@ export async function cacheGet(privateOrPublicKey, key){
 
 export async function cacheDel(privateOrPublicKey, key){
     const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
     return redisRateLimit.hdel(dbKey, key);
 }
 
@@ -170,7 +180,7 @@ export function unlockJSON(json, passwd){
 }
 
 export async function publicProduce(publicKey, data){
-    const dbKey = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.manyToOne + parseKey(publicKey).random;
     return Promise.all([
       redisData.rpush(dbKey, data),
       redisData.expire(dbKey, ttl)
@@ -179,7 +189,7 @@ export async function publicProduce(publicKey, data){
 
 export async function privateConsume(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.manyToOne + parseKey(publicKey, { validate: false }).random;
     const atomicTransaction = redisData.multi();
     atomicTransaction.lrange(dbKey, 0, -1);
     atomicTransaction.del(dbKey);
@@ -189,26 +199,27 @@ export async function privateConsume(privateKey){
 
 export async function privateProduce(privateKey, data){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
     return redisData.set(dbKey, data, { ex: ttl });
 }
 
 export async function privateDelete(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
     return redisData.del(dbKey);
 }
 
 export async function privateRefresh(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
     return redisData.expire(dbKey, ttl);
 }
 
 export async function privateStats(privateKey){
     const publicKey = genPublicKey(privateKey);
-    const dbKeyConsume = dbKeyPrefix.manyToOne + publicKey.substring(sigLen);
-    const dbKeyPublish = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
+    const publicKeyRandom = parseKey(publicKey, { validate: false }).random
+    const dbKeyConsume = dbKeyPrefix.manyToOne + publicKeyRandom;
+    const dbKeyPublish = dbKeyPrefix.oneToMany + publicKeyRandom;
     const [ countConsume, ttlConsume ] = await Promise.all([
       redisData.llen(dbKeyConsume),
       redisData.ttl(dbKeyConsume)
@@ -221,13 +232,13 @@ export async function privateStats(privateKey){
 
 // Demand for data also refreshes its expiry
 export async function publicConsume(publicKey){
-    const dbKey = dbKeyPrefix.oneToMany + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey).random;
     return redisData.getex(dbKey, { ex: ttl });
 }
 
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
     const field = {[hash(key)]: data};
     // Ideally there should be hexpire() in Upstash's Redis SDK.
     // Until it's available, we expire the containing key as follows.
@@ -238,7 +249,7 @@ export async function oneToOneProduce(privateKey, key, data){
 }
 
 export async function oneToOneConsume(publicKey, key){
-    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey).random;
     const field = hash(key);
     const atomicTransaction = redisData.multi();
     atomicTransaction.hget(dbKey, field);
@@ -249,7 +260,7 @@ export async function oneToOneConsume(publicKey, key){
 
 export async function oneToOneTTL(privateKey, key){
     const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + publicKey.substring(sigLen);
+    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
     const field = hash(key);
     // Ideally there should be httl() in Upstash's Redis SDK.
     // Until it's available, we use ttl of the containing key as follows.
@@ -263,12 +274,13 @@ export async function oneToOneTTL(privateKey, key){
 // Tokens are stored in LIFO stacks. Old and unused tokens are trimmed.
 // Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation
 export async function streamToken(privateOrPublicKey, receive=true){
-  const type = validate(privateOrPublicKey, false);
+  const type = parseKey(privateOrPublicKey).type;
   const typeComplement = (type == 'private') ? 'public' : 'private';
-  const publicKey = genPublicKey(privateOrPublicKey);
+  const publicKey = genPublicKey(privateOrPublicKey, { validate: false });
+  const publicKeyRandom = parseKey(publicKey, { validate: false }).random;
   const mode = receive ? "receive" : "send";
   const modeComplement = receive ? "send" : "receive";
-  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKey.substring(sigLen));
+  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKeyRandom);
   const timeNow = Math.round(Date.now()/1000);
   if (existing) {
     const [token, timestamp] = existing.split('@');
@@ -277,7 +289,7 @@ export async function streamToken(privateOrPublicKey, receive=true){
     if ((timeNow - timestamp) < streamTimeout) return token;
   }
   const token = randStr();
-  const dbKey = dbKeyPrefix.stream[type][mode] + publicKey.substring(sigLen);
+  const dbKey = dbKeyPrefix.stream[type][mode] + publicKeyRandom;
   await Promise.all([
     redisData.lpush(dbKey, token + '@' + timeNow),
     redisData.expire(dbKey, streamTimeout),

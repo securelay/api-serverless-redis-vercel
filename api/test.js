@@ -7,16 +7,13 @@ import * as helper from './helper.js';
 
 // process.exit(); // Use this to exit this script
 
-console.log('Sending OneSignal Push for formonit app...OneSignal API returns:', 
-  await helper.OneSignalSendPush('formonit', '6kI2oBt2dN', {"hello":"there"}));
-
 const key = helper.genKeyPair();
 
 console.log(JSON.stringify(key));
 
-console.log('This should show public: ', helper.validate(key.public), helper.assert(key.public, 'public'));
-console.log('This should show private: ', helper.validate(key.private), helper.assert(key.private, 'private'));
-console.log('This should show false: ', helper.validate('random'), helper.assert('random', 'private') || helper.assert('random', 'public'));
+console.log('This should show public: ', helper.parseKey(key.public)['type']);
+console.log('This should show private: ', helper.parseKey(key.private).type);
+console.log('This should show true: ', helper.parseKey('random', {validate: false}).type === undefined );
 
 console.log('Stream token private POST:', await helper.streamToken(key.private, false));
 console.log('Stream token public GET:', await helper.streamToken(key.public));
