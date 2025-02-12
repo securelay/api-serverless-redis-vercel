@@ -1,5 +1,6 @@
 import * as helper from './helper.js';
 import Fastify from 'fastify';
+import { waitUntil } from '@vercel/functions';
 
 const endpointID = helper.id();
 const cdnUrlBase = `https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}`;
@@ -117,7 +118,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             ])
         }
         
-        if (app) await helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {});
+        if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {}));
 
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: webhookUsed});
@@ -160,7 +161,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
           dataHandler = () => helper.privateConsume(privateKey);
         }
         
-        const [ _, statsObj, dataArray ] = await Promise.all([
+        const [ , statsObj, dataArray ] = await Promise.all([
           webhookHandler(),
           statsHandler(),
           dataHandler()
