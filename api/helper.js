@@ -118,9 +118,8 @@ export function genPublicKey(privateOrPublicKey, { validate = true } = {}){
     return keyType('public') + sign(publicRandom + 'public') + publicRandom;
 }
 
-// Default seed is ~ 22*6 = 132-bit cryptographically random
-export function genKeyPair(seed = randStr(22)){
-    const privateRandom = hash(seed);
+export function genKeyPair(){
+    const privateRandom = randStr(hashLen);
     const privateKey = keyType('private') + sign(privateRandom + 'private') + privateRandom;
     const publicKey = genPublicKey(privateKey, { validate: false });
     return {private: privateKey, public: publicKey};

@@ -69,7 +69,7 @@ fastify.get('/keys/:key', (request, reply) => {
     const { key } = request.params;
     try {
       const publicKey = helper.genPublicKey(key); // Also validates, even if key is public!
-      const type = helper.parseKey(key).type;
+      const type = helper.parseKey(key, { validate: false }).type;
       reply.send( { type: type, public: publicKey } );
     } catch (err) {
       if (err.message === 'Invalid Key') {
