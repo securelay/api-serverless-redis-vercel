@@ -93,7 +93,17 @@ fastify.post('/public/:publicKey', async (request, reply) => {
         let webhookUsed = false;
 
         const app = request.query.app;
-        const data = helper.decoratePayload(request.body);
+
+        const meta =  {};
+        const { 
+          'x-vercel-ip-country': country,
+          'x-vercel-ip-country-region': region,
+          'x-vercel-ip-city': city,
+          'x-real-ip': ip
+        } = request.headers;
+        if (country || region || city) meta.geolocation = [country, region, city].join('/');
+        if (ip) meta.ip = ip;
+        const data = helper.decoratePayload(request.body, meta);
 
         // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
         try {
@@ -112,10 +122,8 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             
             webhookUsed = true;
         } catch (err) {
-            await Promise.all([
-              helper.publicProduce(publicKey, data),
-              helper.cacheDel(publicKey, 'hook')
-            ])
+            await helper.publicProduce(publicKey, data);
+            waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
         }
         
         if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {}));
@@ -145,31 +153,22 @@ fastify.get('/private/:privateKey', async (request, reply) => {
     const webhook = request.query.hook;
     const statsPresent = 'stats' in request.query;
 
-    let webhookHandler, statsHandler, dataHandler;
-    webhookHandler = statsHandler = dataHandler = () => null; // default
-
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
-        if (webhook == null) {
-            webhookHandler = () => helper.cacheDel(privateKey, 'hook');
+
+        if (webhook) {
+            waitUntil(helper.cacheSet(privateKey, {hook:webhook}).catch((err) => {}));
         } else {
-            webhookHandler = () => helper.cacheSet(privateKey, {hook:webhook});
+            waitUntil(helper.cacheDel(privateKey, 'hook').catch((err) => {}));
         }
+
         if (statsPresent) {
-          statsHandler = () => helper.privateStats(privateKey);
+          reply.send(await helper.privateStats(privateKey));
         } else {
-          dataHandler = () => helper.privateConsume(privateKey);
+          const dataArray = await helper.privateConsume(privateKey);
+          if (!dataArray.length) throw new Error('No Data');
+          reply.send(dataArray);
         }
-        
-        const [ , statsObj, dataArray ] = await Promise.all([
-          webhookHandler(),
-          statsHandler(),
-          dataHandler()
-        ])
-        
-        if (statsPresent) return statsObj;
-        if (!dataArray.length) throw new Error('No Data');
-        reply.send(dataArray);
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');
