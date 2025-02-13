@@ -123,7 +123,7 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             webhookUsed = true;
         } catch (err) {
             await helper.publicProduce(publicKey, data);
-            waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
+            if (webhook) waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
         }
         
         if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {}));

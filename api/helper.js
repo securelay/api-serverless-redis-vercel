@@ -37,15 +37,15 @@ const dbKeyPrefix = {
 
 // Redis client for user database
 const redisData = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  url: process.env.UPSTASH_REDIS_REST_URL_MAIN,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN_MAIN,
   latencyLogging: false,
   enableAutoPipelining: true
 })
 // Redis client for ratelimiter database
 const redisRateLimit = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
+  url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE,
   latencyLogging: false,
   enableAutoPipelining: true
 })
