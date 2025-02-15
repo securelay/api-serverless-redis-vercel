@@ -1,5 +1,5 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npm run build",
   "devCommand": null,
   "framework": null,
   "functions": {
@@ -7,9 +7,10 @@
       "maxDuration": 5
     }
   },
-  "installCommand": "npm install",
-  "outputDirectory": null,
+  "installCommand": null,
+  "outputDirectory": "./build",
   "trailingSlash": false,
+  "cleanUrls": true,
   "redirects": [
     {
       "source": "/",

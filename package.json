@@ -11,7 +11,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "node --env-file=.env api/test.js",
+    "build": "./build.sh",
+    "test": "node --env-file=.env test.js",
     "lint": "semistandard --fix"
   }
 }

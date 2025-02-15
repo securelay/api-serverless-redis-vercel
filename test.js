@@ -3,7 +3,7 @@ Brief: Testing
 Run: node --env-file=.env test.js
 */
 
-import * as helper from './helper.js';
+import * as helper from './api/_utils.js';
 
 // process.exit(); // Use this to exit this script
 
