@@ -6,9 +6,13 @@ rm -rf "${build_dir}";
 mkdir "${build_dir}";
 cp -r assets/* "${build_dir}"
 
+id="$(npm run id | tail -n1)";
+
+echo "${id}" > "${build_dir}/id.txt"
+
 cat > "${build_dir}/properties.json" <<-EOF
 {
-    "endpointId": "${ID}",
+    "id": "${id}",
     "OneSignalAppId": {
         "formonit": "${ONESIGNAL_APP_ID_FORMONIT}"
     },

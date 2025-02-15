@@ -44,24 +44,6 @@ const callInternalServerError = function(reply, msg){
     reply.code(500).send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
 }
 
-fastify.get('/', (request, reply) => {
-    reply.redirect('https://securelay.github.io', 301);
-})
-
-fastify.get('/id', (request, reply) => {
-    const app = request.query.app;
-    if (app == null) {
-      reply.send(endpointID);
-    } else {
-      const OneSignalID = helper.OneSignalID(app);
-      if (OneSignalID) {
-        reply.send(OneSignalID);
-      } else {
-        reply.callNotFound();
-      }
-    }
-})
-
 fastify.get('/keys', (request, reply) => {
     reply.send(helper.genKeyPair());
 })

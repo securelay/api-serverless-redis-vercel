@@ -11,6 +11,7 @@
   },
   "type": "module",
   "scripts": {
+    "id": "node --env-file=.env id.js",
     "build": "./build.sh",
     "test": "node --env-file=.env test.js",
     "lint": "semistandard --fix"

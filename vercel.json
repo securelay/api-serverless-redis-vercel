@@ -25,7 +25,11 @@
     },
     {
       "source": "/id",
-      "destination": "/api"
+      "destination": "/id.txt"
+    },
+    {
+      "source": "/(properties|limits)",
+      "destination": "/properties.json"
     }
   ]
 }
