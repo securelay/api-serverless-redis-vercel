@@ -20,7 +20,9 @@ cat > "${build_dir}/properties.json" <<-EOF
     "cdnTtl": "${CDN_TTL} days",
     "limits": {
         "size": "${BODYLIMIT} bytes per request",
-        "rate": "${RATELIMIT} requests / ${RATELIMIT_WINDOW} seconds"
+        "rate": "${RATELIMIT} requests / ${RATELIMIT_WINDOW} seconds",
+        "maxMessagesRetained": "${MAX_PUBLIC_POSTS_RETAINED}",
+        "maxKeyValFields": "${MAX_PRIVATE_POST_FIELDS}"
     }
 }
 EOF

@@ -44,6 +44,10 @@ const callInternalServerError = function(reply, msg){
     reply.code(500).send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
 }
 
+const callInsufficientStorage = function(reply, msg){
+    reply.code(507).send({message: msg, error: "Insufficient Storage", statusCode: reply.statusCode});
+}
+
 fastify.get('/keys', (request, reply) => {
     reply.send(helper.genKeyPair());
 })
@@ -121,6 +125,8 @@ fastify.post('/public/:publicKey', async (request, reply) => {
                 callUnauthorized(reply, 'Provided key is not Public');
             } else if (err.message === 'Invalid Key') {
                 callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'No Payload') {
+                callBadRequest(reply, 'No data provided in the request body');
             } else {
                 callInternalServerError(reply, err.message);
             }
@@ -197,6 +203,8 @@ fastify.post('/private/:privateKey', async (request, reply) => {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
                 callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'No Payload') {
+                callBadRequest(reply, 'No data provided in the request body');
             } else {
                 callInternalServerError(reply, err.message);
             }
@@ -308,6 +316,10 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
                 callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
                 callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'No Payload') {
+                callBadRequest(reply, 'No data provided in the request body');
+            } else if (err.message === 'Insufficient Storage') {
+                callInsufficientStorage(reply, 'GET existing field(s) before POSTing new one(s)');
             } else {
                 callInternalServerError(reply, err.message);
             }
