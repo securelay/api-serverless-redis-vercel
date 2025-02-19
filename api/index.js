@@ -2,6 +2,7 @@ import * as helper from './_utils.js';
 import Fastify from 'fastify';
 import { waitUntil } from '@vercel/functions';
 
+const middlewareSig = process.env.SECRET; // Secret known to middleware only
 const endpointID = helper.id();
 const cdnUrlBase = `https://cdn.jsdelivr.net/gh/securelay/jsonbin@main/${endpointID}`;
 //const cdnUrlBase = `https://securelay.github.io/jsonbin/${endpointID}`;
@@ -370,7 +371,9 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
 
 const streamHandler = async (request, reply) => {
   const { key } = request.params;
+  const fromMiddleware = request.headers['x-middleware'] === middlewareSig;
   try {
+    if (! fromMiddleware) throw new Error('Unauthorized');
     let recvBool;
     switch (request.method) {
       case 'POST': // Using fallthrough! POST and PUT cases run the same code.
@@ -386,7 +389,9 @@ const streamHandler = async (request, reply) => {
     const token = await helper.streamToken(key, recvBool);
     reply.redirect('https://ppng.io/' + token, 307);
   } catch (err) {
-    if (err.message == 'Invalid Key') {
+    if (err.message == 'Unauthorized') {
+      callUnauthorized(reply, 'This path is for internal use only');
+    } else if (err.message == 'Invalid Key') {
       callBadRequest(reply, 'Provided key is invalid');
     } else if (err.message == 'Unsupported Method') {
       callBadRequest(reply, 'Unsupported method');
