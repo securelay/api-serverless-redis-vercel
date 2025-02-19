@@ -112,7 +112,10 @@ fastify.post('/public/:publicKey', async (request, reply) => {
             if (webhook) waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
         }
         
-        if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, {webhook: webhookUsed, data: data}).catch((err) => {}));
+        if (app) {
+            data.webhook = webhookUsed; // Adding webhook info to metadata
+            waitUntil(helper.OneSignalSendPush(app, publicKey, data).catch((err) => {}));
+        }
 
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: webhookUsed});
