@@ -44,10 +44,15 @@ async function pipeToStream(request) {
 export default async function middleware(request) {
   const fromMiddleware = request.headers.get('x-middleware') === middlewareSig;
 
-  // You could alternatively rate-limit based on user ID or similar
-  const ip = ipAddress(request) || '127.0.0.1';
+  // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
+  const ratelimitBy = [
+    request.method,
+    new URL(request.url).pathname,
+    ipAddress(request)
+  ].join('@');
+
   // For requests from middleware, no rate-limiting is necessary
-  const { success, reset } = fromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ip);
+  const { success, reset } = fromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ratelimitBy);
 
   if (success) {
     const streamResponse = await pipeToStream(request);
