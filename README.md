@@ -1,9 +1,8 @@
 # About
-This is a serverless, NodeJS implementation of the [Securelay API](https://github.com/securelay/specs), using [Redis](https://redis.io/docs/latest/commands/) as database.
+This is a serverless, NodeJS implementation of the [Securelay API](https://github.com/securelay/specs), using [Upstash/Redis](https://upstash.com/docs/redis/help/faq) as database.
 It is configured to be hosted on [Vercel](https://vercel.com/pricing)'s Fluid Compute
 out of the box. However, with a few [variations](https://fastify.dev/docs/latest/Guides/Serverless/),
-this implmentation may be run on any serverless platform such as [AWS Lambda](https://fastify.dev/docs/latest/Guides/Serverless/#aws),
-provided a Redis DB with REST API, such as offered by [Upstash](https://upstash.com/pricing/redis), can be used.
+this implementation may be run on any serverless platform such as [Cloudflare Workers](https://developers.cloudflare.com/workers/platform/pricing/), [Netlify functions](https://www.netlify.com/pricing/) or [AWS Lambda](https://aws.amazon.com/lambda/pricing/). If [Upstash/Redis](https://upstash.com/pricing/redis) becomes unavailable, any of its drop-in replacements, such as [Momento](https://www.gomomento.com/pricing/), may be used.
 
 # How to host on Vercel
 
@@ -43,3 +42,33 @@ To this aim, create a GitHub repo and a fine-grained access token [`GITHUB_PAT`]
 
 # Contact
 If you have any queries, comments or feedback, please [get in touch](https://github.com/securelay/securelay.github.io/discussions/1).
+
+# FAQ
+
+### Why serverless?
+Because of
+- cheaper compute / generous free-tiers
+- managed infra
+    - elastic scaling
+    - DDoS mitigation
+    - static asset CDN
+- ease of deployment
+- ease of development
+
+### Why Vercel?
+Because it is good for prototyping and getting hang of the serverless world. Adaptations for Cloudflare Workers and Netlify are planned.
+
+### Why Redis?
+Because Redis's `string`, `list` and `hash` datatypes fit Securelay's data model perfectly. Script `eval` can efficiently execute most CRUD operations offered by Securelay. `expire` and `hexpire` takes care of Securelay's ephemeral nature easily.
+
+### Why Upstash?
+Because their web-API to Redis is tailor-made for serverless, where ephemeral function instances cannot maintain persistent connections to the DB. Also Upstash provides excellent open-source SDKs.
+
+### Why only a single function?
+Some serverless providers may not support multiple functions. Also, only a single function means less cold-starts.
+
+### Why Fastify?
+Just to make life easy during prototyping, as regards request parsing, request body limiting, routing etc. Future versions must get rid of the dependency to reduce deployment size and save on the GB-Hrs.
+
+### Which JS APIs/Modules/Runtime?
+Vercel's functions run on NodeJS runtime, whereas the middleware run on Edge runtime, which is a lightweight runtime based on V8. Cloudflare Workers run on V8. So, while choosing APIs/Modules, one needs to go for as much portability between runtimes as possible. Case in point 'node:crypto' and 'Web-Crypto'.
