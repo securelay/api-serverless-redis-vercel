@@ -77,7 +77,6 @@ fastify.post('/public/:publicKey', async (request, reply) => {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
 
         const webhook = await helper.cacheGet(publicKey, 'hook'); // Also validates key
-        let webhookUsed = false;
 
         const app = request.query.app;
 
@@ -92,9 +91,11 @@ fastify.post('/public/:publicKey', async (request, reply) => {
         if (ip) meta.ip = ip;
         const data = helper.decoratePayload(request.body, meta);
 
-        // Try posting the data to webhook, if any, with timeout. On fail, store/bin data for later retrieval.
+        // Try posting the data to webhook, if any, with timeout.
+        // On fail, store data and send web-push notifications to owner.
         try {
             if (!webhook) throw new Error('No webhook');
+            data.webhook = true; // Data passed via webhook should also have webhook-usage metadata
             
             await fetch(webhook, {
                 method: "POST",
@@ -107,19 +108,15 @@ fastify.post('/public/:publicKey', async (request, reply) => {
                 return response.text();
             })
             
-            webhookUsed = true;
         } catch (err) {
+            data.webhook = false;
             await helper.publicProduce(publicKey, data);
             if (webhook) waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
-        }
-        
-        if (app) {
-            data.webhook = webhookUsed; // Adding webhook info to metadata
-            waitUntil(helper.OneSignalSendPush(app, publicKey, data).catch((err) => {}));
+            if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, data).catch((err) => {}));
         }
 
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: webhookUsed});
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: data.webhook});
         } else {
             reply.redirect(redirectOnOk, 303);
         }

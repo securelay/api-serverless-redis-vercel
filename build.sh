@@ -12,6 +12,10 @@ echo "${id}" > "${build_dir}/id.txt"
 
 cat > "${build_dir}/properties.json" <<-EOF
 {
+    "versions": {
+        "specification": "0.0",
+        "implementation": "0.0.0"
+    },
     "id": "${id}",
     "OneSignalAppId": {
         "formonit": "${ONESIGNAL_APP_ID_FORMONIT}"
