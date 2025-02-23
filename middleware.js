@@ -13,6 +13,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 
 const middlewareSig = process.env.SECRET; // Secret known to middleware only
+const bodyLimit = parseInt(process.env.BODYLIMIT);
 
 const cache = new Map(); // must be outside of your serverless function handler
 
@@ -28,21 +29,73 @@ const ratelimit = new Ratelimit({
   enableProtection: true
 })
 
-// Forwards requests at path /pipe/* to /stream/* in index.js after trimming the request body and headers
-// and returns the response. This is done in middleware.js because, unlike index.js, middleware.js doesn't have
-// problems with the `Expect: 100-continue` header sent by `curl -T- <url>`. middleware.js also doesn't read the
-// request body. index.js also has a set bodyLimit which is incompatible with payloads at /pipe/* of arbitrary size.
-// /stream/ path is exposed only to middleware.
-// For requests not at path /pipe/*, returns null.
-async function pipeToStream(request) {
-  const pipeUrl = new URL(request.url);
-  if (!pipeUrl.pathname.startsWith('/pipe/')) return null;
-  const streamUrl = pipeUrl.href.replace('/pipe/', '/stream/');
-  return fetch(streamUrl, { method: request.method, headers: { 'x-middleware' : middlewareSig }, redirect: 'manual' });
+// Returns a response from the backend (serverless-function) to the piped request modified to have no body.
+// Prevents Fastify in the backend from parsing the original request.body unnecessarily.
+// May not be needed when Fastify dependency is removed from the backend.
+async function processPipe(request) {
+  // No need to worry with GET/HEAD requests as Fastify at backend won't parse content for these methods
+  if (request.method.match(/(GET|HEAD)/gi)) return next();
+  return fetch(request.url, {
+    method: request.method,
+    headers: { 'x-middleware' : middlewareSig },
+    redirect: 'manual'
+  });
 }
 
+// Performs basic validation and limiting
+// Returns a Response object or Promise that resolves to a Response
+// Calling next() actually returns a Response with added header 'x-middleware-next'
+// Ref: @vercel/edge source - https://www.npmjs.com/package/@vercel/edge?activeTab=code
 export default async function middleware(request) {
-  const fromMiddleware = request.headers.get('x-middleware') === middlewareSig;
+  // Block requests with Expect headers
+  if (request.headers.has('expect')) return Response.json(
+    { message: 'Expect header is not allowed', error: "Expectation Failed", statusCode: 417 },
+    {
+      status: 417,
+      statusText: "Expectation Failed",
+      headers: {"Access-Control-Allow-Origin":"*"}
+    }
+  )
+  
+  const contentType = request.headers.get('content-type') ?? '';
+  const isNotChunked = !(request.headers.get('transfer-encoding')?.includes('chunked'));
+  const contentLength = parseInt(request.headers.get('content-length') ?? 0);
+  // Absent content-length is as good as 0, as Transfer-Encoding: chunked is not allowed
+
+  // Detect a pipe request to let it have any Content-Type and Length, including `Transfer-Encoding: chunked` header  
+  const isPiped = new URL(request.url).pathname.startsWith('/pipe/');
+  
+  switch (true) {
+    case isPiped:
+      break; // Allowed to have any Content-Type and Length, including `Transfer-Encoding: chunked` header
+    case contentLength === 0 && isNotChunked:
+      break; // Doesn't matter what the content-type is as it wont be parsed
+    case contentType.includes('application/json'):
+    case contentType.includes('application/x-www-form-urlencoded'):
+    case contentType.includes('text/plain'):
+    case contentType.includes('text/html'):
+      if (contentLength <= bodyLimit) break;
+    default:
+      let errMessage;
+      if (contentLength > bodyLimit) {
+        errMessage = `Content-Length ${contentLength} is not within ${bodyLimit}`;
+      } else {
+        errMessage = `Content-Type '${contentType}' is not allowed`;        
+      }
+      return Response.json(
+        { message: errMessage, error: "Bad Request", statusCode: 400 },
+        {
+          status: 400,
+          statusText: "Bad Request",
+          headers: {"Access-Control-Allow-Origin":"*"}
+        }
+      )
+  }
+  
+  // If one invocation of this middleware modifies the Request and resends,
+  // another invocation of this middleware will intercept it before it reaches the backend.
+  // The following flag tells the latter invocation that it need not re-process the request.
+  const isFromMiddleware = request.headers.get('x-middleware') === middlewareSig;
 
   // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
   const ratelimitBy = [
@@ -52,21 +105,23 @@ export default async function middleware(request) {
   ].join('@');
 
   // For requests from middleware, no rate-limiting is necessary
-  const { success, reset } = fromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ratelimitBy);
+  const { success, reset } = isFromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ratelimitBy);
 
   if (success) {
-    const streamResponse = await pipeToStream(request);
-    // For non-pipe requests, streamResponse is null.
-    return streamResponse ?? next();
-  }
-  else {
+    switch (true) {
+      case isPiped:
+        if (! isFromMiddleware) return processPipe(request);
+      default:
+        return next();
+    }
+  } else {
     return Response.json(
-    { message: `Try after ${(reset - Date.now())/1000} seconds`, error: "Too Many Requests", statusCode: 429 },
-    {
+      { message: `Try after ${(reset - Date.now())/1000} seconds`, error: "Too Many Requests", statusCode: 429 },
+      {
       status: 429,
       statusText: "Too Many Requests",
       headers: {"Access-Control-Allow-Origin":"*"}
-    },
-  )
+      }
+    )
   }
 }
