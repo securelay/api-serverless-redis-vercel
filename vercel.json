@@ -20,7 +20,7 @@
   ],
   "rewrites": [
     {
-      "source": "/(public|private|keys|stream)/:path*",
+      "source": "/(public|private|keys|pipe)/:path*",
       "destination": "/api"
     },
     {

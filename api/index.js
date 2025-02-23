@@ -21,7 +21,7 @@ const fastify = Fastify({
 fastify.addHook('onRequest', (request, reply, done) => {
     reply.headers({
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE'
+        'Access-Control-Allow-Methods': 'HEAD,GET,POST,PATCH,DELETE'
     })
     done();
 })
@@ -368,15 +368,14 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
 
 const streamHandler = async (request, reply) => {
   const { key } = request.params;
-  const fromMiddleware = request.headers['x-middleware'] === middlewareSig;
   try {
-    if (! fromMiddleware) throw new Error('Unauthorized');
     let recvBool;
     switch (request.method) {
       case 'POST': // Using fallthrough! POST and PUT cases run the same code.
       case 'PUT':
         recvBool = false;
         break;
+      case 'HEAD': // HEAD and GET handled similarly
       case 'GET':
         recvBool = true;
         break;
@@ -398,7 +397,7 @@ const streamHandler = async (request, reply) => {
   }
 }
 
-fastify.all('/stream/:key', streamHandler);
+fastify.all('/pipe/:key', streamHandler);
 
 export default async function handler(req, res) {
   await fastify.ready();
