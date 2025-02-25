@@ -68,11 +68,11 @@ fastify.get('/keys/:key', (request, reply) => {
     }
 })
 
-fastify.post('/public/:publicKey', async (request, reply) => {
-    const { publicKey } = request.params;
+fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
+    const { publicKey, channel } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-
+    let payload = request.body;
     try {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
 
@@ -85,11 +85,20 @@ fastify.post('/public/:publicKey', async (request, reply) => {
           'x-vercel-ip-country': country,
           'x-vercel-ip-country-region': region,
           'x-vercel-ip-city': city,
-          'x-real-ip': ip
+          'x-real-ip': ip,
+          'content-length': bodySize
         } = request.headers;
         if (country || region || city) meta.geolocation = [country, region, city].join('/');
         if (ip) meta.ip = ip;
-        const data = helper.decoratePayload(request.body, meta);
+        if (channel) {
+          meta.channel = channel;
+          // If request doesn't have a body, use the value stored in channel(key) instead
+          if (parseInt(bodySize) === 0) {
+            const channelData = await helper.oneToOneConsume(publicKey, channel);
+            payload = channelData?.data ?? {};
+          }
+        }
+        const data = helper.decoratePayload(payload, meta);
 
         // Try posting the data to webhook, if any, with timeout.
         // On fail, store data and send web-push notifications to owner.
@@ -368,6 +377,7 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
 
 fastify.all('/private/:privateKey.pipe', async (request, reply) => {
     const { privateKey } = request.params;
+    const pipeFail = request.query.fail;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
         let recvBool;
@@ -384,6 +394,7 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
                 throw new Error('Unsupported Method');
         }
     const pipeURL = await helper.pipeToPublic(privateKey, recvBool);
+    if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
     reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
@@ -414,8 +425,17 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
                 throw new Error('Unsupported Method');
         }
     const pipeURL = await helper.pipeToPrivate(publicKey, recvBool);
-    if (!pipeURL) throw new Error('No Data');
-    reply.redirect(pipeURL, 307);
+    if (pipeURL) {
+      reply.redirect(pipeURL, 307);
+    } else {
+      const page404 = await helper.cacheGet(publicKey, 'pipeFail');
+      if (page404) {
+        reply.redirect(page404, 303);
+      } else {
+        throw new Error('No Data');
+      }
+    }
+    
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');
