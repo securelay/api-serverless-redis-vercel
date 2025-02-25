@@ -13,8 +13,8 @@ echo "${id}" > "${build_dir}/id.txt"
 cat > "${build_dir}/properties.json" <<-EOF
 {
     "versions": {
-        "specification": "0.0",
-        "implementation": "0.0.0"
+        "specification": "0.1",
+        "implementation": "0.0.1"
     },
     "id": "${id}",
     "OneSignalAppId": {
