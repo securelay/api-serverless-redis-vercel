@@ -79,7 +79,7 @@ export default async function middleware (request) {
   if (request.headers.has('expect')) return errorResponse(417, 'Expect header is not allowed');
 
   // Detect a pipe request to let it have any Content-Type and Length, including `Transfer-Encoding: chunked` header
-  const isPiped = new URL(request.url).pathname.startsWith('/pipe/');
+  const isPiped = new URL(request.url).pathname.endsWith('.pipe');
 
   // Block unallowed methods and chunked transfer if not pipe
   if (!isPiped) {

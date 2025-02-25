@@ -397,7 +397,8 @@ const streamHandler = async (request, reply) => {
   }
 }
 
-fastify.all('/pipe/:key', streamHandler);
+fastify.all('/private/:key.pipe', streamHandler);
+fastify.all('/public/:key.pipe', streamHandler);
 
 export default async function handler(req, res) {
   await fastify.ready();
