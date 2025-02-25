@@ -25,15 +25,9 @@ const dbKeyPrefix = {
                 oneToMany: "o2m:",
                 oneToOne: "o2o:",
                 cache: "cache:",
-                stream: {
-                  public: {
-                    send: "pipePubSend:",
-                    receive: "pipePubRecv:"
-                  },
-                  private: {
-                    send: "pipePrivSend:",
-                    receive: "pipePrivRecv:"
-                  }
+                pipe: {
+                  send: "pipePubSend:",
+                  receive: "pipePubRecv:"
                 }
             }
 
@@ -279,31 +273,43 @@ export async function oneToOneTTL(privateKey, key){
     return {ttl: bool ? ttl : 0};
 }
 
-// Tokens are stored in LIFO stacks. Old and unused tokens are trimmed.
-// Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation
-export async function streamToken(privateOrPublicKey, receive=true){
-  const type = parseKey(privateOrPublicKey).type;
-  const typeComplement = (type == 'private') ? 'public' : 'private';
-  const publicKey = genPublicKey(privateOrPublicKey, { validate: false });
-  const publicKeyRandom = parseKey(publicKey, { validate: false }).random;
+// streamTimeout simply guarantees that a pipe, if plumbed, will be plumbed within that time period.
+// Tokens are stored in LIFO stacks of finite max length.
+// Once stack is filled, new tokens evict old ones. Pipes corresponding to evicted tokens are trimmed.
+// Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation.
+export async function pipeToPublic(privateKey, receive=true){
+  const publicKey = genPublicKey(privateKey);
   const mode = receive ? "receive" : "send";
-  const modeComplement = receive ? "send" : "receive";
-  const existing = await redisData.lpop(dbKeyPrefix.stream[typeComplement][modeComplement] + publicKeyRandom);
-  const timeNow = Math.round(Date.now()/1000);
-  if (existing) {
-    const [token, timestamp] = existing.split('@');
-    // Expired unused tokens are possible as adding new tokens refreshes the expiry of the entire list (see below).
-    // Return token that is not expired.
-    if ((timeNow - timestamp) < streamTimeout) return token;
-  }
+  const dbKey = dbKeyPrefix.pipe[mode] + parseKey(publicKey, { validate: false }).random;
   const token = randStr();
-  const dbKey = dbKeyPrefix.stream[type][mode] + publicKeyRandom;
+  const timeNow = Math.round(Date.now()/1000);
   const [ count, ] = await Promise.all([
     redisData.lpush(dbKey, token + '@' + timeNow),
     redisData.expire(dbKey, streamTimeout)
   ])
-  if (count > maxStreamCount) await redisData.ltrim(dbKey, 0, maxStreamCount - 1);
+  if (count > maxStreamCount) {
+    const expiredTokens = await redisData.rpop(dbKey, count - maxStreamCount);
+  }
   return token;
+}
+
+// Expired, unused tokens imply pipes in waiting, never to be discovered. Those must be trimmed.
+export async function pipeToPrivate(publicKey, receive=true){
+  const privateMode = receive ? "send" : "receive";
+  const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey).random;
+  const fromDB = await redisData.lpop(dbKey);
+  const timeNow = Math.round(Date.now()/1000);
+  if (fromDB) {
+    const [token, timestamp] = fromDB.split('@');
+    // Expired unused tokens are possible as adding new tokens refreshes the expiry of the entire list
+    // Return token if it is not expired
+    // Because of LIFO, if the first-out token is expired, the entire list is expired, so pop those off
+    if ((timeNow - timestamp) < streamTimeout) {
+      return token;
+    } else {
+      const expiredTokens = await redisData.lpop(dbKey, maxStreamCount);
+    }
+  }
 }
 
 export function OneSignalID(app){

@@ -366,39 +366,68 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
     }    
 })
 
-const streamHandler = async (request, reply) => {
-  const { key } = request.params;
-  try {
-    let recvBool;
-    switch (request.method) {
-      case 'POST': // Using fallthrough! POST and PUT cases run the same code.
-      case 'PUT':
-        recvBool = false;
-        break;
-      case 'HEAD': // HEAD and GET handled similarly
-      case 'GET':
-        recvBool = true;
-        break;
-      default:
-        throw new Error('Unsupported Method');
-    }
-    const token = await helper.streamToken(key, recvBool);
+fastify.all('/private/:privateKey.pipe', async (request, reply) => {
+    const { privateKey } = request.params;
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        let recvBool;
+        switch (request.method) {
+            case 'POST': // Using fallthrough! POST and PUT cases run the same code.
+            case 'PUT':
+                recvBool = false;
+                break;
+            case 'HEAD': // HEAD and GET handled similarly
+            case 'GET':
+                recvBool = true;
+                break;
+            default:
+                throw new Error('Unsupported Method');
+        }
+    const token = await helper.pipeToPublic(privateKey, recvBool);
     reply.redirect('https://ppng.io/' + token, 307);
-  } catch (err) {
-    if (err.message == 'Unauthorized') {
-      callUnauthorized(reply, 'This path is for internal use only');
-    } else if (err.message == 'Invalid Key') {
-      callBadRequest(reply, 'Provided key is invalid');
-    } else if (err.message == 'Unsupported Method') {
-      callBadRequest(reply, 'Unsupported method');
-    } else {
-      callInternalServerError(reply, err.message);
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else {
+            callInternalServerError(reply, err.message);
+        }
     }
-  }
-}
+});
 
-fastify.all('/private/:key.pipe', streamHandler);
-fastify.all('/public/:key.pipe', streamHandler);
+fastify.all('/public/:publicKey.pipe', async (request, reply) => {
+    const { publicKey } = request.params;
+    try {
+        if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        let recvBool;
+        switch (request.method) {
+            case 'POST': // Using fallthrough! POST and PUT cases run the same code.
+            case 'PUT':
+                recvBool = false;
+                break;
+            case 'HEAD': // HEAD and GET handled similarly
+            case 'GET':
+                recvBool = true;
+                break;
+            default:
+                throw new Error('Unsupported Method');
+        }
+    const token = await helper.pipeToPrivate(publicKey, recvBool);
+    if (!token) throw new Error('No Data');
+    reply.redirect('https://ppng.io/' + token, 307);
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'No Data') {
+            reply.callNotFound();
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }
+});
 
 export default async function handler(req, res) {
   await fastify.ready();
