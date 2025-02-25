@@ -383,8 +383,8 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
             default:
                 throw new Error('Unsupported Method');
         }
-    const token = await helper.pipeToPublic(privateKey, recvBool);
-    reply.redirect('https://ppng.io/' + token, 307);
+    const pipeURL = await helper.pipeToPublic(privateKey, recvBool);
+    reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');
@@ -413,9 +413,9 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
             default:
                 throw new Error('Unsupported Method');
         }
-    const token = await helper.pipeToPrivate(publicKey, recvBool);
-    if (!token) throw new Error('No Data');
-    reply.redirect('https://ppng.io/' + token, 307);
+    const pipeURL = await helper.pipeToPrivate(publicKey, recvBool);
+    if (!pipeURL) throw new Error('No Data');
+    reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');

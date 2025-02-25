@@ -8,6 +8,7 @@ import { Buffer } from "node:buffer";
 import { Redis } from '@upstash/redis';
 import { Octokit } from '@octokit/core';
 import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
+import { waitUntil } from '@vercel/functions';
 
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
@@ -19,6 +20,8 @@ const streamTimeout = parseInt(process.env.STREAM_TIMEOUT);
 const maxStreamCount = parseInt(process.env.MAX_STREAM_COUNT);
 const maxPublicPostCount = parseInt(process.env.MAX_PUBLIC_POSTS_RETAINED);
 const maxFieldsCount = parseInt(process.env.MAX_PRIVATE_POST_FIELDS);
+const pipingServerURL = process.env.PIPING_SERVER_URL;
+const defunctPipePlumbTimeout = parseInt(process.env.DEFUNCT_PIPE_PLUMB_TIMEOUT);
 
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
@@ -273,9 +276,25 @@ export async function oneToOneTTL(privateKey, key){
     return {ttl: bool ? ttl : 0};
 }
 
+// Plumbs defunct pipes with bodyless http-requests under timeout
+function plumbDefunctPipes(tokens, receive=true){
+  if (Boolean(tokens?.length) === false) return;
+  const method = receive ? "POST" : "GET";
+  const opts = {
+    method,
+    body: '',
+    signal: AbortSignal.timeout(defunctPipePlumbTimeout)
+  }
+  tokens.forEach((el) => {
+    const [ token, ] = el.split('@');
+    waitUntil(fetch(pipingServerURL + token, opts).catch((err) => {}));
+  })
+}
+
 // streamTimeout simply guarantees that a pipe, if plumbed, will be plumbed within that time period.
 // Tokens are stored in LIFO stacks of finite max length.
-// Once stack is filled, new tokens evict old ones. Pipes corresponding to evicted tokens are trimmed.
+// New tokens evict old ones, once stack is filled.
+// Pipes corresponding to evicted tokens are never discovered, i.e. are defunct.
 // Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation.
 export async function pipeToPublic(privateKey, receive=true){
   const publicKey = genPublicKey(privateKey);
@@ -289,11 +308,12 @@ export async function pipeToPublic(privateKey, receive=true){
   ])
   if (count > maxStreamCount) {
     const expiredTokens = await redisData.rpop(dbKey, count - maxStreamCount);
+    plumbDefunctPipes(expiredTokens);
   }
-  return token;
+  return pipingServerURL + token;
 }
 
-// Expired, unused tokens imply pipes in waiting, never to be discovered. Those must be trimmed.
+// Expired, unused tokens imply defunct pipes (see above).
 export async function pipeToPrivate(publicKey, receive=true){
   const privateMode = receive ? "send" : "receive";
   const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey).random;
@@ -305,9 +325,10 @@ export async function pipeToPrivate(publicKey, receive=true){
     // Return token if it is not expired
     // Because of LIFO, if the first-out token is expired, the entire list is expired, so pop those off
     if ((timeNow - timestamp) < streamTimeout) {
-      return token;
+      return pipingServerURL + token;
     } else {
       const expiredTokens = await redisData.lpop(dbKey, maxStreamCount);
+      plumbDefunctPipes([token+'@'+timestamp,...expiredTokens]);
     }
   }
 }
