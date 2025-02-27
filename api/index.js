@@ -49,6 +49,12 @@ const callInsufficientStorage = function(reply, msg){
     reply.code(507).send({message: msg, error: "Insufficient Storage", statusCode: reply.statusCode});
 }
 
+const callMethodNotAllowed = function(reply, allowedMethods, msg){
+    reply.code(405)
+      .header('Allow', allowedMethods)
+      .send({message: msg, error: "Method Not Allowed", statusCode: reply.statusCode});
+}
+
 fastify.get('/keys', (request, reply) => {
     reply.send(helper.genKeyPair());
 })
@@ -68,11 +74,11 @@ fastify.get('/keys/:key', (request, reply) => {
     }
 })
 
-fastify.post('/public/:publicKey', async (request, reply) => {
-    const { publicKey } = request.params;
+fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
+    const { publicKey, channel } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-
+    let payload = request.body;
     try {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
 
@@ -85,11 +91,20 @@ fastify.post('/public/:publicKey', async (request, reply) => {
           'x-vercel-ip-country': country,
           'x-vercel-ip-country-region': region,
           'x-vercel-ip-city': city,
-          'x-real-ip': ip
+          'x-real-ip': ip,
+          'content-length': bodySize
         } = request.headers;
         if (country || region || city) meta.geolocation = [country, region, city].join('/');
         if (ip) meta.ip = ip;
-        const data = helper.decoratePayload(request.body, meta);
+        if (channel) {
+          meta.channel = channel;
+          // If request doesn't have a body, use the value stored in channel(key) instead
+          if (parseInt(bodySize) === 0) {
+            const channelData = await helper.oneToOneConsume(publicKey, channel);
+            payload = channelData?.data ?? {};
+          }
+        }
+        const data = helper.decoratePayload(payload, meta);
 
         // Try posting the data to webhook, if any, with timeout.
         // On fail, store data and send web-push notifications to owner.
@@ -366,38 +381,56 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
     }    
 })
 
-const streamHandler = async (request, reply) => {
-  const { key } = request.params;
-  try {
-    let recvBool;
-    switch (request.method) {
-      case 'POST': // Using fallthrough! POST and PUT cases run the same code.
-      case 'PUT':
-        recvBool = false;
-        break;
-      case 'HEAD': // HEAD and GET handled similarly
-      case 'GET':
-        recvBool = true;
-        break;
-      default:
-        throw new Error('Unsupported Method');
+fastify.all('/private/:privateKey.pipe', async (request, reply) => {
+    const { privateKey } = request.params;
+    const pipeFail = request.query.fail;
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        const pipeURL = await helper.pipeToPublic(privateKey, request.method);
+        if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
+        reply.redirect(pipeURL, 307);
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Method Not Allowed') {
+            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+        } else {
+            callInternalServerError(reply, err.message);
+        }
     }
-    const token = await helper.streamToken(key, recvBool);
-    reply.redirect('https://ppng.io/' + token, 307);
-  } catch (err) {
-    if (err.message == 'Unauthorized') {
-      callUnauthorized(reply, 'This path is for internal use only');
-    } else if (err.message == 'Invalid Key') {
-      callBadRequest(reply, 'Provided key is invalid');
-    } else if (err.message == 'Unsupported Method') {
-      callBadRequest(reply, 'Unsupported method');
-    } else {
-      callInternalServerError(reply, err.message);
-    }
-  }
-}
+});
 
-fastify.all('/pipe/:key', streamHandler);
+fastify.all('/public/:publicKey.pipe', async (request, reply) => {
+    const { publicKey } = request.params;
+    try {
+        if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        const pipeURL = await helper.pipeToPrivate(publicKey, request.method);
+        if (pipeURL) {
+            reply.redirect(pipeURL, 307);
+        } else {
+            const page404 = await helper.cacheGet(publicKey, 'pipeFail');
+            if (page404) {
+                reply.redirect(page404, 303);
+            } else {
+                throw new Error('No Data');
+            }
+        }
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'No Data') {
+            reply.callNotFound();
+        } else if (err.message === 'Method Not Allowed') {
+            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }
+});
 
 export default async function handler(req, res) {
   await fastify.ready();
