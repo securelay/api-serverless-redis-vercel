@@ -49,6 +49,12 @@ const callInsufficientStorage = function(reply, msg){
     reply.code(507).send({message: msg, error: "Insufficient Storage", statusCode: reply.statusCode});
 }
 
+const callMethodNotAllowed = function(reply, allowedMethods, msg){
+    reply.code(405)
+      .header('Allow', allowedMethods)
+      .send({message: msg, error: "Method Not Allowed", statusCode: reply.statusCode});
+}
+
 fastify.get('/keys', (request, reply) => {
     reply.send(helper.genKeyPair());
 })
@@ -380,27 +386,16 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
     const pipeFail = request.query.fail;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
-        let recvBool;
-        switch (request.method) {
-            case 'POST': // Using fallthrough! POST and PUT cases run the same code.
-            case 'PUT':
-                recvBool = false;
-                break;
-            case 'HEAD': // HEAD and GET handled similarly
-            case 'GET':
-                recvBool = true;
-                break;
-            default:
-                throw new Error('Unsupported Method');
-        }
-    const pipeURL = await helper.pipeToPublic(privateKey, recvBool);
-    if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
-    reply.redirect(pipeURL, 307);
+        const pipeURL = await helper.pipeToPublic(privateKey, request.method);
+        if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
+        reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Method Not Allowed') {
+            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
         } else {
             callInternalServerError(reply, err.message);
         }
@@ -411,31 +406,17 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
-        let recvBool;
-        switch (request.method) {
-            case 'POST': // Using fallthrough! POST and PUT cases run the same code.
-            case 'PUT':
-                recvBool = false;
-                break;
-            case 'HEAD': // HEAD and GET handled similarly
-            case 'GET':
-                recvBool = true;
-                break;
-            default:
-                throw new Error('Unsupported Method');
+        const pipeURL = await helper.pipeToPrivate(publicKey, request.method);
+        if (pipeURL) {
+            reply.redirect(pipeURL, 307);
+        } else {
+            const page404 = await helper.cacheGet(publicKey, 'pipeFail');
+            if (page404) {
+                reply.redirect(page404, 303);
+            } else {
+                throw new Error('No Data');
+            }
         }
-    const pipeURL = await helper.pipeToPrivate(publicKey, recvBool);
-    if (pipeURL) {
-      reply.redirect(pipeURL, 307);
-    } else {
-      const page404 = await helper.cacheGet(publicKey, 'pipeFail');
-      if (page404) {
-        reply.redirect(page404, 303);
-      } else {
-        throw new Error('No Data');
-      }
-    }
-    
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Private');
@@ -443,6 +424,8 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
             callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
             reply.callNotFound();
+        } else if (err.message === 'Method Not Allowed') {
+            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
         } else {
             callInternalServerError(reply, err.message);
         }

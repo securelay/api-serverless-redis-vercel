@@ -29,8 +29,8 @@ const dbKeyPrefix = {
                 oneToOne: "o2o:",
                 cache: "cache:",
                 pipe: {
-                  send: "pipePubSend:",
-                  receive: "pipePubRecv:"
+                  send: "pipeSend:",
+                  receive: "pipeRecv:"
                 }
             }
 
@@ -276,10 +276,24 @@ export async function oneToOneTTL(privateKey, key){
     return {ttl: bool ? ttl : 0};
 }
 
-// Plumbs defunct pipes with bodyless http-requests under timeout
-function plumbDefunctPipes(tokens, receive=true){
+// Whether provided http method means 'send' or 'receive' mode.
+// If option `complement` is true, returns the complementary mode instead.
+function methodToMode(method, complement=false){
+  const table = { send: ['POST', 'PUT'], receive: ['GET', 'HEAD'] };
+  const mode = Object.keys(table).find((key) => {
+    return table[key].includes(method) === !complement;
+  })
+  if (!mode) throw new Error('Method Not Allowed');
+  return mode;
+}
+
+// Plumbs defunct private pipes with bodyless http-requests under timeout
+function plumbDefunctPipes(tokens, privateMode){
+  // If private mode is sending, plumb with 'GET'.
+  // Plumb with 'POST', otherwise.
+  const table = {send: 'GET', receive: 'POST'};
   if (Boolean(tokens?.length) === false) return;
-  const method = receive ? "POST" : "GET";
+  const method = table[privateMode];
   const opts = {
     method,
     body: '',
@@ -295,11 +309,12 @@ function plumbDefunctPipes(tokens, receive=true){
 // Tokens are stored in LIFO stacks of finite max length.
 // New tokens evict old ones, once stack is filled.
 // Pipes corresponding to evicted tokens are never discovered, i.e. are defunct.
+// Defunct pipes are plumbed later with bodyless pipes: see plumbDefunctPipes().
 // Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation.
-export async function pipeToPublic(privateKey, receive=true){
+export async function pipeToPublic(privateKey, httpMethod){
   const publicKey = genPublicKey(privateKey);
-  const mode = receive ? "receive" : "send";
-  const dbKey = dbKeyPrefix.pipe[mode] + parseKey(publicKey, { validate: false }).random;
+  const privateMode = methodToMode(httpMethod);
+  const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey, { validate: false }).random;
   const token = randStr();
   const timeNow = Math.round(Date.now()/1000);
   const [ count, ] = await Promise.all([
@@ -308,14 +323,14 @@ export async function pipeToPublic(privateKey, receive=true){
   ])
   if (count > maxStreamCount) {
     const expiredTokens = await redisData.rpop(dbKey, count - maxStreamCount);
-    plumbDefunctPipes(expiredTokens);
+    plumbDefunctPipes(expiredTokens, privateMode);
   }
   return pipingServerURL + token;
 }
 
 // Expired, unused tokens imply defunct pipes (see above).
-export async function pipeToPrivate(publicKey, receive=true){
-  const privateMode = receive ? "send" : "receive";
+export async function pipeToPrivate(publicKey, httpMethod){
+  const privateMode = methodToMode(httpMethod, true);
   const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey).random;
   const fromDB = await redisData.lpop(dbKey);
   const timeNow = Math.round(Date.now()/1000);
@@ -328,7 +343,7 @@ export async function pipeToPrivate(publicKey, receive=true){
       return pipingServerURL + token;
     } else {
       const expiredTokens = await redisData.lpop(dbKey, maxStreamCount);
-      plumbDefunctPipes([token+'@'+timestamp,...expiredTokens]);
+      plumbDefunctPipes([token+'@'+timestamp,...expiredTokens], privateMode);
     }
   }
 }
