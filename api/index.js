@@ -21,7 +21,8 @@ const fastify = Fastify({
 fastify.addHook('onRequest', (request, reply, done) => {
     reply.headers({
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'HEAD,GET,POST,PATCH,DELETE'
+        'Access-Control-Allow-Methods': 'HEAD,GET,POST,PATCH,DELETE',
+        'Content-Disposition': 'inline'
     })
     done();
 })
