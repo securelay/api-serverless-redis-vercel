@@ -137,13 +137,17 @@ export async function cacheSet(privateOrPublicKey, obj){
 }
 
 // Demand for data also refreshes its expiry
-export async function cacheGet(privateOrPublicKey, key){
+// If multiple keys are provided comma-separated as key1, key2, ..., returns json obj: {key1: val1, key2: val2, ...}
+// If only a single key is provided, returns the corresponding value as string
+export async function cacheGet(privateOrPublicKey, ...keys){
     const publicKey = genPublicKey(privateOrPublicKey);
     const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
-    return Promise.all([
-      redisRateLimit.hget(dbKey, key),
+    const [valuesObj, ] = await Promise.all([
+      redisRateLimit.hmget(dbKey, ...keys),
       redisRateLimit.expire(dbKey, cacheTtl)
-    ]).then((values) => values[0]);
+    ])
+    if (keys.length === 1) return valuesObj[keys[0]]; // If `keys` has a single key only, return only its value
+    return valuesObj;
 }
 
 export async function cacheDel(privateOrPublicKey, key){

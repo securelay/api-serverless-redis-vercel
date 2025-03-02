@@ -15,6 +15,10 @@ console.log('This should show public: ', helper.parseKey(key.public)['type']);
 console.log('This should show private: ', helper.parseKey(key.private).type);
 console.log('This should show true: ', helper.parseKey('random', {validate: false}).type === undefined );
 
+await helper.cacheSet(key.private, {fieldA: 'valA', fieldB: 'valB'});
+console.log('Cache multiple values:', JSON.stringify(await helper.cacheGet(key.public, 'fieldA', 'fieldB', 'fieldC')));
+console.log('Cache single value:', await helper.cacheGet(key.public, 'fieldB'));
+
 console.log('Stream token private POST:', await helper.streamToken(key.private, false));
 console.log('Stream token public GET:', await helper.streamToken(key.public));
 console.log('Stream token public POST:', await helper.streamToken(key.public, false));
