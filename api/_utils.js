@@ -10,6 +10,8 @@ import { Octokit } from '@octokit/core';
 import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
 import { waitUntil } from '@vercel/functions';
 
+const kvCache = {};
+
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
 const hashLen = parseInt(process.env.HASH_LEN);
@@ -25,7 +27,7 @@ const defunctPipePlumbTimeout = parseInt(process.env.DEFUNCT_PIPE_PLUMB_TIMEOUT)
 
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
-                oneToMany: "o2m:",
+                oneToMany: "kv:",
                 oneToOne: "o2o:",
                 cache: "cache:",
                 pipe: {
@@ -201,19 +203,91 @@ export async function privateConsume(privateKey){
       .then((values) => values[0]);
 }
 
-export async function privateProduce(privateKey, data){
+// Sets Key-Val pair(s) for the KV mode
+// Keys are stored in a Redis hash as is with prefix 'key:'
+// Corresponding views are stored as hash(key) with prefix 'views:'
+// Password, if provided, is stored against key: 'passwd:'
+// Negative views (-N) means after N more views the corresponding key-val will be deleted
+export async function kvSet(privateKey, kvObj, { password, count, overwrite=false }={} ){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
-    return redisData.set(dbKey, data, { ex: ttl });
+    const redisHash = {};
+    if (password) redisHash['passwd:'] = hash(password);
+    const initCount = (count === 1 ) ? count : -count;
+    Object.keys(kvObj).forEach((key) => {
+      redisHash['key:'+key] = kvObj[key];
+      if (count) redisHash['views:'+hash(key)] = initCount;
+    })
+    if (overwrite) {
+      redisData.del(dbKey);
+    } else if (await redisData.hlen(dbKey) >= maxFieldsCount) {
+      throw new Error('Insufficient Storage');
+    }
+    return Promise.all([
+      redisData.hset(dbKey, redisHash),
+      redisData.expire(dbKey, ttl)
+    ]);
 }
 
-export async function privateDelete(privateKey){
+// Caches all or selected key-vals in `kvCache` for use by others.
+// So, pulling the key-vals from the DB can be done once only.
+// Accessing data refreshes expiry.
+// Note: Optionally, provide redis-hash-keys instead of user's keys from kv
+async function cacheKV(dbKey, ...redisHashKeys){
+  if (Object.keys(kvCache).length) return; // Dont proceed if already cached
+  redisData.expire(dbKey, ttl); // Puts command in auto-pipeline
+  if (redisHashKeys.length) {
+    // Pull provided keys only, to save bandwidth
+    Object.assign(kvCache, await redisData.hmget(dbKey, ...redisHashKeys));
+  } else {
+    // Pull all keys
+    Object.assign(kvCache, await redisData.hgetall(dbKey));
+  }
+}
+
+// Gets all key-vals in kv mode.
+export async function kvScan(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
-    return redisData.del(dbKey);
+    await cacheKV(dbKey);
+    return Object.keys(kvCache)
+      .filter((redisHashKey) => redisHashKey.startsWith('key:'))
+      .reduce((obj, redisHashKey) => {
+          const key = redisHashKey.substring(4); // Substring to remove the prefix 'key:'
+          obj[key] = kvCache[redisHashKey];
+          return obj;
+        },
+        {}
+      )
 }
 
-export async function privateRefresh(privateKey){
+// Gets all key-views in kv mode.
+export async function kvViews(privateKey){
+    const publicKey = genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
+    await cacheKV(dbKey);
+    return Object.keys(kvCache)
+      .filter((redisHashKey) => redisHashKey.startsWith('key:'))
+      .reduce((obj, redisHashKey) => {
+          const key = redisHashKey.substring(4); // Substring to remove the prefix 'key:'
+          obj[key] = kvCache['views:' + hash(key)];
+          return obj;
+        },
+        {}
+      )
+}
+
+export async function kvDelete(privateKey, ...keys){
+    const publicKey = genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
+    if (keys.length) {
+      return redisData.hdel(dbKey, ...keys);
+    } else {
+      return redisData.del(dbKey);
+    }
+}
+
+export async function kvRefresh(privateKey){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
     return redisData.expire(dbKey, ttl);
@@ -235,20 +309,50 @@ export async function privateStats(privateKey){
 }
 
 // Demand for data also refreshes its expiry
-export async function publicConsume(publicKey){
+export async function kvGet(publicKey, password, ...kvKeys){
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey).random;
-    return redisData.getex(dbKey, { ex: ttl });
+
+    const redisHashKeys = ['passwd:',];
+    const viewsKeyMap = {};
+    kvKeys.forEach((key) => {
+      redisHashKeys.push('key:'+key);
+      viewsKeyMap[key] = 'views:'+hash(key);
+    })
+    redisHashKeys.push(...Object.values(viewsKeyMap));
+
+    await cacheKV(dbKey, ...redisHashKeys);
+    const kvObj = {};
+    const delHashKeys = [];
+    const incrHashCtrs = {};
+
+    if (kvCache['passwd:'] == null || kvCache['passwd:'] === hash(password)) {
+      kvKeys.forEach((key) => {
+        kvObj[key] = kvCache['key:'+key];
+        const count = kvCache[viewsKeyMap[key]];
+        if (count) {
+          incrHashCtrs[viewsKeyMap[key]] = count+1;
+        } else {
+          delHashKeys.push('key:'+key, viewsKeyMap[key]);
+        }
+      })
+      if (Object.keys(incrHashCtrs).length) waitUntil(redisData.hset(dbKey, incrHashCtrs));
+      if (delHashKeys.length) waitUntil(redisData.hdel(dbKey, ...delHashKeys));
+    } else {
+      throw new Error('Unauthorized');
+    }
+    
+    if (kvKeys.length > 1) {
+      return kvObj;
+    } else {
+      return kvObj[kvKeys[0]];
+    }
 }
 
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
     const field = hash(key);
-    const [ fieldExists, currFieldCount ] = await Promise.all([
-      redisData.hexists(dbKey, field),
-      redisData.hlen(dbKey)
-    ])
-    if ((!fieldExists) && (currFieldCount >= maxFieldsCount)) throw new Error('Insufficient Storage');
+    if (await redisData.hlen(dbKey) >= maxFieldsCount) throw new Error('Insufficient Storage');
     // Ideally there should be hexpire() in Upstash's Redis SDK.
     // Until it's available, we expire the containing key as follows.
     return Promise.all([
