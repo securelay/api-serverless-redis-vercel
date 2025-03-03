@@ -338,7 +338,11 @@ export async function oneToOneProduce(privateKey, key, data){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
     const field = hash(key);
-    if (await redisData.hlen(dbKey) >= maxFieldsCount) throw new Error('Insufficient Storage');
+    const [ fieldExists, currFieldCount ] = await Promise.all([
+      redisData.hexists(dbKey, field),
+      redisData.hlen(dbKey)
+    ])
+    if ((!fieldExists) && (currFieldCount >= maxFieldsCount)) throw new Error('Insufficient Storage');
     // Ideally there should be hexpire() in Upstash's Redis SDK.
     // Until it's available, we expire the containing key as follows.
     return Promise.all([

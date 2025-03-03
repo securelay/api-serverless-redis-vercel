@@ -286,6 +286,40 @@ fastify.get('/public/:publicKey', async (request, reply) => {
     }    
 })
 
+fastify.post('/private/:privateKey.kv', async (request, reply) => {
+    const { privateKey } = request.params;
+    const redirectOnOk = request.query.ok;
+    const redirectOnErr = request.query.err;
+    const overwrite = 'overwrite' in request.query;
+    const password = request.query.password;
+    const count = request.query.count;
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        await helper.kvSet(privateKey, request.body, { password, count, overwrite });
+        if (redirectOnOk == null) {
+            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+        } else {
+            reply.redirect(redirectOnOk, 303);
+        }
+    } catch (err) {
+        if (redirectOnErr == null) {
+            if (err.message == 'Unauthorized') {
+                callUnauthorized(reply, 'Provided key is not Private');
+            } else if (err.message === 'Invalid Key') {
+                callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'No Payload') {
+                callBadRequest(reply, 'No data provided in the request body');
+            } else if (err.message === 'Insufficient Storage') {
+                callInsufficientStorage(reply, 'Delete existing key(s) before adding new one(s)');
+            } else {
+                callInternalServerError(reply, err.message);
+            }
+        } else {
+            reply.redirect(redirectOnErr, 303);
+        }
+    }    
+})
+
 fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     const redirectOnOk = request.query.ok;
