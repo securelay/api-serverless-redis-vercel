@@ -320,6 +320,31 @@ fastify.post('/private/:privateKey.kv', async (request, reply) => {
     }    
 })
 
+fastify.get('/private/:privateKey.kv', async (request, reply) => {
+    const { privateKey } = request.params;
+    const viewsPresent = 'views' in request.query;
+
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+
+        if (viewsPresent) {
+          reply.send(await helper.kvViews(privateKey));
+        } else {
+          reply.send(await helper.kvScan(privateKey));
+        }
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'No Data') {
+            reply.callNotFound();
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }    
+})
+
 fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     const redirectOnOk = request.query.ok;
