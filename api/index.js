@@ -191,25 +191,18 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-    const passwd = request.query.password;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
 
-        const cdn = {};
-        if (passwd == null) {
+
           if (! await helper.githubPushJSON(privateKey, request.body)) throw new Error('Push to GitHub CDN failed');
-          cdn['cdn'] = `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`;
-        } else {
-          const data = JSON.stringify(helper.decoratePayload(request.body, {}, passwd));
-          await helper.privateProduce(privateKey, data);
-        }
 
         if (redirectOnOk == null) {
             reply.send({
               message: "Done",
               error: "Ok",
               statusCode: reply.statusCode,
-              ...cdn
+              cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
             });
         } else {
             reply.redirect(redirectOnOk, 303);
@@ -233,14 +226,9 @@ fastify.post('/private/:privateKey', async (request, reply) => {
 
 fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
-    const passwdPresent = 'password' in request.query;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
-        if (passwdPresent) {
-          await helper.privateDelete(privateKey);
-        } else {
           if (! await helper.githubPushJSON(privateKey, null, true)) throw new Error('Push to GitHub CDN failed');
-        }
         reply.code(204);
     } catch (err) {
         if (err.message == 'Unauthorized') {
@@ -255,23 +243,16 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
 
 fastify.patch('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
-    const passwdPresent = 'password' in request.query;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
 
-        const cdn = {};
-        if (passwdPresent) {
-          await helper.privateRefresh(privateKey);
-        } else {
           if (! await helper.githubPushJSON(privateKey)) throw new Error('Push to GitHub CDN failed');
-          cdn['cdn'] = `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`;
-        }
 
         reply.send({
           message: "Done",
           error: "Ok",
           statusCode: reply.statusCode,
-          ...cdn
+          cdn: `${cdnUrlBase}/${helper.genPublicKey(privateKey)}.json`
         });
     } catch (err) {
         if (err.message == 'Unauthorized') {
@@ -286,20 +267,10 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
 
 fastify.get('/public/:publicKey', async (request, reply) => {
     const { publicKey } = request.params;
-    const passwd = request.query.password;
     try {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
         
-        if (passwd == null) {
           reply.redirect(`${cdnUrlBase}/${publicKey}.json`, 301);
-        } else {
-          const data = await helper.publicConsume(publicKey);
-          if (!data) throw new Error('No Data');
-          const unlockedData = helper.unlockJSON(data, passwd);
-          if (!unlockedData) throw new Error('Unlock Failed');
-          reply.send(unlockedData);
-        }
-        
     } catch (err) {
         if (err.message == 'Unauthorized') {
             callUnauthorized(reply, 'Provided key is not Public');
