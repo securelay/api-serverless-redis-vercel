@@ -345,6 +345,73 @@ fastify.get('/private/:privateKey.kv', async (request, reply) => {
     }    
 })
 
+fastify.delete('/private/:privateKey.kv/:key?', async (request, reply) => {
+    const { privateKey, key } = request.params;
+    const keys = [];
+    if (key) keys.push(key);
+    const commaSeparatedKeys = request.query.keys;
+    if (commaSeparatedKeys) keys.push(commaSeparatedKeys.split(','));
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        await helper.kvDelete(privateKey, ...keys);
+        reply.code(204);
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }
+})
+
+fastify.patch('/private/:privateKey.kv', async (request, reply) => {
+    const { privateKey } = request.params;
+    try {
+        if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+
+        await helper.kvRefresh(privateKey);
+        
+        reply.send({
+          message: "Done",
+          error: "Ok",
+          statusCode: reply.statusCode
+        });
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Private');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }
+})
+
+fastify.get('/public/:publicKey.kv/:key?', async (request, reply) => {
+    const { publicKey, key } = request.params;
+    const password = request.query.password;
+    const keys = [];
+    if (key) keys.push(key);
+    const commaSeparatedKeys = request.query.keys;
+    if (commaSeparatedKeys) keys.push(commaSeparatedKeys.split(','));
+    try {
+        if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        reply.send(await helper.kvGet(publicKey, password, ...keys));
+    } catch (err) {
+        if (err.message == 'Unauthorized') {
+            callUnauthorized(reply, 'Provided key is not Public');
+        } else if (err.message === 'Invalid Key') {
+            callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'No Data') {
+            reply.callNotFound();
+        } else {
+            callInternalServerError(reply, err.message);
+        }
+    }    
+})
+
 fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     const redirectOnOk = request.query.ok;

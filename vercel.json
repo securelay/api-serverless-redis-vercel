@@ -40,6 +40,10 @@
       "destination": "/api"
     },
     {
+      "source": "/(public|private)/([\\w-]+).kv/(.*)",
+      "destination": "/api"
+    },
+    {
       "source": "/id",
       "destination": "/id.txt"
     },

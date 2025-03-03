@@ -267,7 +267,13 @@ export async function kvDelete(privateKey, ...keys){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
     if (keys.length) {
-      return redisData.hdel(dbKey, ...keys);
+      const redisHashKeys = keys.reduce((arr, key) => {
+          arr.push('key:' + key, 'views:' + hash(key));
+          return arr;
+        },
+        []
+      )
+      return redisData.hdel(dbKey, ...redisHashKeys);
     } else {
       return redisData.del(dbKey);
     }
@@ -307,6 +313,7 @@ export async function kvGet(publicKey, password, ...kvKeys){
     redisHashKeys.push(...Object.values(viewsKeyMap));
 
     await cacheKV(dbKey, ...redisHashKeys);
+
     const kvObj = {};
     const delHashKeys = [];
     const incrHashCtrs = {};
