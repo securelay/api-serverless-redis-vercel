@@ -46,6 +46,10 @@ const callInternalServerError = function(reply, msg){
     reply.code(500).send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
 }
 
+const callConflict = function(reply, msg){
+    reply.code(409).send({message: msg, error: "Conflict", statusCode: reply.statusCode});
+}
+
 const callInsufficientStorage = function(reply, msg){
     reply.code(507).send({message: msg, error: "Insufficient Storage", statusCode: reply.statusCode});
 }
@@ -432,6 +436,8 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
                 callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
                 callBadRequest(reply, 'No data provided in the request body');
+            } else if (err.message === 'Already Exists') {
+                callConflict(reply, 'Field already exists. GET publicly before POSTing new value');
             } else if (err.message === 'Insufficient Storage') {
                 callInsufficientStorage(reply, 'GET existing field(s) before POSTing new one(s)');
             } else {

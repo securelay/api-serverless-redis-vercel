@@ -369,10 +369,13 @@ export async function oneToOneProduce(privateKey, key, data){
     ])
 
     // Delete the last added key if storage is full
-    if (added && currFieldCount > maxFieldsCount) {
-      await redisData.hdel(dbKey, field);
+    if (currFieldCount >= maxFieldsCount) {
+      if (added) waitUntil(redisData.hdel(dbKey, field));
       throw new Error('Insufficient Storage');
-    } 
+      return;
+    }
+    
+    if(!added) throw new Error('Already Exists');
 }
 
 export async function oneToOneConsume(publicKey, key){
