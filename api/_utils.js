@@ -193,22 +193,33 @@ export async function privateConsume(privateKey){
 // Keys are stored in a Redis hash as is with prefix 'key:'
 // Corresponding views are stored as hash(key) with prefix 'views:'
 // Password, if provided, is stored against key: 'passwd:'
-// Negative views (-N) means after N more views the corresponding key-val will be deleted
-export async function kvSet(privateKey, kvObj, { password, count, overwrite=false }={} ){
+// N views means after N more views the corresponding key-val will be deleted
+export async function kvSet(privateKey, kvObj, { password, views, fresh=false }={} ){
     const publicKey = genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
-    const redisHash = {};
+
+    // Number coercion. Could also use unary + to turns empty strings into 0
+    const viewsCount = Number(views);
+
+    const redisHash = Object.keys(kvObj).reduce((obj, key) => {
+        obj['key:'+key] = kvObj[key];
+        if (!Number.isNaN(viewsCount)) obj['views:'+hash(key)] = -viewsCount;
+        return obj;
+      },
+      {}
+    )
     if (password) redisHash['passwd:'] = hash(password);
-    const initCount = (count === 1 ) ? count : -count;
-    Object.keys(kvObj).forEach((key) => {
-      redisHash['key:'+key] = kvObj[key];
-      if (count) redisHash['views:'+hash(key)] = initCount;
-    })
-    if (overwrite) {
+
+    let existingKeys;
+    if (fresh) {
       redisData.del(dbKey);
-    } else if (await redisData.hlen(dbKey) >= maxFieldsCount) {
-      throw new Error('Insufficient Storage');
+      existingKeys = [];
+    } else {
+      existingKeys = await redisData.hkeys(dbKey);
     }
+    const stagedKeys = Object.keys(redisHash);
+    if (new Set(existingKeys.concat(stagedKeys)).size > maxFieldsCount) throw new Error('Insufficient Storage');
+
     return Promise.all([
       redisData.hset(dbKey, redisHash),
       redisData.expire(dbKey, ttl)
@@ -320,12 +331,14 @@ export async function kvGet(publicKey, password, ...kvKeys){
 
     if (kvCache['passwd:'] == null || kvCache['passwd:'] === hash(password)) {
       kvKeys.forEach((key) => {
-        kvObj[key] = kvCache['key:'+key];
+        const val = kvCache['key:'+key];
+        if (val == null) return;
+        kvObj[key] = val;
         const count = kvCache[viewsKeyMap[key]];
-        if (count) {
-          incrHashCtrs[viewsKeyMap[key]] = count+1;
-        } else {
+        if (count == -1) {
           delHashKeys.push('key:'+key, viewsKeyMap[key]);
+        } else {
+          incrHashCtrs[viewsKeyMap[key]] = count+1;
         }
       })
       if (Object.keys(incrHashCtrs).length) waitUntil(redisData.hset(dbKey, incrHashCtrs));
@@ -350,8 +363,9 @@ export async function oneToOneProduce(privateKey, key, data){
       redisData.hlen(dbKey)
     ])
     if ((!fieldExists) && (currFieldCount >= maxFieldsCount)) throw new Error('Insufficient Storage');
-    // Ideally there should be hexpire() in Upstash's Redis SDK.
-    // Until it's available, we expire the containing key as follows.
+    // Ideally, fields should be expired using hexpire()
+    // However, hexpire() is not in Upstash's Redis SDK yet
+    // Hence, expiring fields in a different way
     return Promise.all([
       redisData.hset(dbKey, {[field]: data}),
       redisData.expire(dbKey, ttl)

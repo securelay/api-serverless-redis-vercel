@@ -290,12 +290,12 @@ fastify.post('/private/:privateKey.kv', async (request, reply) => {
     const { privateKey } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
-    const overwrite = 'overwrite' in request.query;
+    const fresh = 'new' in request.query;
     const password = request.query.password;
-    const count = request.query.count;
+    const views = request.query.views;
     try {
         if (helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
-        await helper.kvSet(privateKey, request.body, { password, count, overwrite });
+        await helper.kvSet(privateKey, request.body, { password, views, fresh });
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
         } else {
@@ -395,7 +395,7 @@ fastify.get('/public/:publicKey.kv/:key?', async (request, reply) => {
     const keys = [];
     if (key) keys.push(key);
     const commaSeparatedKeys = request.query.keys;
-    if (commaSeparatedKeys) keys.push(commaSeparatedKeys.split(','));
+    if (commaSeparatedKeys) keys.push(...commaSeparatedKeys.split(','));
     try {
         if (helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
         reply.send(await helper.kvGet(publicKey, password, ...keys));
