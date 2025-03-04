@@ -70,16 +70,24 @@ async function processPipe (request) {
   });
 }
 
+// This is the entry point to middleware, the default export that Vercel invokes
 // Performs basic validation and limiting
 // Returns a Response object or Promise that resolves to a Response
 // Calling next() actually returns a Response with added header 'x-middleware-next'
 // Ref: @vercel/edge source - https://www.npmjs.com/package/@vercel/edge?activeTab=code
+// Note: To optimize, avoid calling the rate-limiter database whenever possible
 export default async function middleware (request) {
+  const requestPath = new URL(request.url).pathname;
+
+  // Pass requests for paths with trailing slash
+  // These will hit vercel.json (with `trailingSlash: false`) next and get redirected automatically!
+  if (requestPath.endsWith('/')) return next();
+
   // Block requests with Expect headers
   if (request.headers.has('expect')) return errorResponse(417, 'Expect header is not allowed');
 
   // Detect a pipe request to let it have any Content-Type and Length, including `Transfer-Encoding: chunked` header
-  const isPiped = new URL(request.url).pathname.endsWith('.pipe');
+  const isPiped = requestPath.endsWith('.pipe');
 
   // Block unallowed methods and chunked transfer if not pipe
   if (!isPiped) {
@@ -121,7 +129,7 @@ export default async function middleware (request) {
   // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
   const ratelimitBy = [
     request.method,
-    new URL(request.url).pathname,
+    requestPath,
     ipAddress(request)
   ].join('@');
 
