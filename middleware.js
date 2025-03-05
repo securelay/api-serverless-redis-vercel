@@ -12,6 +12,21 @@ import { next } from '@vercel/edge';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 
+// Middleware runs for the following paths only.
+// This avoids unnecessary invocations and ratelimit calls which would otherwise count towards Vercel pricing.
+// Note: paths with trailing slashes are not allowed by using regexp: $
+// Such paths hit vercel.json (with `trailingSlash: false`) directly and get redirected automatically!
+export const config = {
+  matcher: [
+    '/keys($)',
+    '/(public|private|keys)/([\\w-]+$)',
+    '/(public|private)/([\\w-]+)/([\\w-]+$)',
+    '/(public|private)/([\\w-]+).pipe($)',
+    '/(public|private)/([\\w-]+).kv($)',
+    '/(public|private)/([\\w-]+).kv/(.*)'
+  ]
+}
+
 const middlewareSig = process.env.SECRET; // Secret known to middleware only
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 
@@ -78,10 +93,6 @@ async function processPipe (request) {
 // Note: To optimize, avoid calling the rate-limiter database whenever possible
 export default async function middleware (request) {
   const requestPath = new URL(request.url).pathname;
-
-  // Pass requests for paths with trailing slash
-  // These will hit vercel.json (with `trailingSlash: false`) next and get redirected automatically!
-  if (requestPath.endsWith('/')) return next();
 
   // Block requests with Expect headers
   if (request.headers.has('expect')) return errorResponse(417, 'Expect header is not allowed');
