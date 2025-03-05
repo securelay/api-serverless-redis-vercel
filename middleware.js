@@ -11,6 +11,7 @@ import { ipAddress } from '@vercel/functions';
 import { next } from '@vercel/edge';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+import { cdnURL } from './api/_utils.js';
 
 // Middleware runs for the following paths only.
 // This avoids unnecessary invocations and ratelimit calls which would otherwise count towards Vercel pricing.
@@ -107,6 +108,10 @@ export default async function middleware (request) {
     }
     if (request.headers.get('transfer-encoding')?.toLowerCase()?.includes('chunked')) {
       return errorResponse(400, 'Provide content-length header instead of chunked transfer');
+    }
+    if (request.method.toUpperCase() === 'GET') {
+      const [, keyType, key] = new RegExp(config.matcher[1]).exec(requestPath) ?? [];
+      if (keyType === 'public' && key) return Response.redirect(await cdnURL(key), 301)
     }
   }
 
