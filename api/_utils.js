@@ -3,8 +3,8 @@ Refs:
 https://upstash.com/docs/redis/sdks/ts/pipelining/pipeline-transaction
 https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 */
-import { hash as cryptoHash, createHmac, getRandomValues } from 'node:crypto';
-import { Buffer } from "node:buffer";
+import { hash as cryptoHash, createHmac } from 'node:crypto';
+import { fromUint8Array as base64encode } from 'js-base64';
 import { Redis } from '@upstash/redis';
 import { Octokit } from '@octokit/core';
 import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
@@ -69,9 +69,9 @@ function sign(str){
 // Brief: Return random base64url string of given length
 function randStr(len = hashLen){
   const byteSize = Math.ceil(len*6/8); // base64 char is 6 bit, byte is 8
-  const buff = Buffer.alloc(byteSize);
-  getRandomValues(buff);
-  return buff.toString('base64url').substring(0,len);
+  const arr = new Uint8Array(byteSize);
+  crypto.getRandomValues(arr);
+  return base64encode(arr, true).substring(0,len);
 }
 
 export function id(){
