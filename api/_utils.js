@@ -515,7 +515,7 @@ export async function OneSignalSendPush(app, externalID, data=null){
 // Derive CDN URL from public key
 export async function cdnURL(publicKey){
   const base = 'https://cdn.jsdelivr.net/gh';
-  return `${base}/${process.env.GITHUB_OWNER_REPO}@main/` + await id();
+  return `${base}/${process.env.GITHUB_OWNER_REPO}@main/` + await id() + `/${publicKey}.json`;
   // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${endpointID}`;
   // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
 }
@@ -524,10 +524,11 @@ export async function cdnURL(publicKey){
 // The function adds metadata using decoratePayload() above.
 // Do not pass JSON in order to touch existing data (i.e. update its timestamp).
 // Pass null as `json` and true as `remove` for removing the stored data.
-// Returns true if data is updated or deleted, false otherwise.
+// Returns link to the data, if data is updated or deleted, false otherwise.
 // Ref: https://github.com/octokit/plugin-create-or-update-text-file.js/
 export async function githubPushJSON(privateKey, json=null, remove=false){
   const publicKey = await genPublicKey(privateKey);
+  const jsonURL = await cdnURL(publicKey);
   const path = await id() + '/' + publicKey + '.json';
   const touch = Boolean(!(json || remove));
   const timeNow = Math.round(Date.now()/1000); // Unix-time in seconds
@@ -537,7 +538,7 @@ export async function githubPushJSON(privateKey, json=null, remove=false){
     // Do not commit to GitHub if re-touching within a day. Because CDN_TTL >> 1 day.
     // Avoiding GitHub traffic reduces blocking time, thus helping performance.
     const lastTouched = await cacheGet(publicKey, 'cdnRenewed');
-    if (lastTouched && ((timeNow - lastTouched) < 86400)) return true;
+    if (lastTouched && ((timeNow - lastTouched) < 86400)) return jsonURL;
     // Just update timestamp in metadata when `touch` is true;
     mode = 'touched';
     
@@ -570,10 +571,11 @@ export async function githubPushJSON(privateKey, json=null, remove=false){
 
   if (mode === 'deleted') {
     await cacheDel(privateKey, 'cdnRenewed');
-    return deleted;
+    if (deleted) return jsonURL;
   } else {
     await cacheSet(privateKey, { cdnRenewed: timeNow });
     // updated and deleted both being truthy means expiry
-    if (updated && !deleted) return await cdnURL(publicKey);
+    if (updated && !deleted) return jsonURL;
   }
+  return false; // Reaching this step means everything failed above
 }

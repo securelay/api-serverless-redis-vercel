@@ -1,3 +1,5 @@
+// Ref: https://fastify.dev/docs/latest/Reference/Routes/#async-await
+
 import * as helper from './_utils.js';
 import Fastify from 'fastify';
 import { waitUntil } from '@vercel/functions';
@@ -22,37 +24,42 @@ fastify.addHook('onRequest', (request, reply, done) => {
 fastify.register(import('@fastify/formbody'))
 
 const callUnauthorized = function(reply, msg){
-    reply.code(401).send({message: msg, error: "Unauthorized", statusCode: reply.statusCode});
+    reply.code(401);
+    return {message: msg, error: "Unauthorized", statusCode: reply.statusCode};
 }
 
 const callForbidden = function(reply, msg){
-    reply.code(403).send({message: msg, error: "Forbidden", statusCode: reply.statusCode});
+    reply.code(403);
+    return {message: msg, error: "Forbidden", statusCode: reply.statusCode};
 }
 
 const callBadRequest = function(reply, msg){
-    reply.code(400).send({message: msg, error: "Bad Request", statusCode: reply.statusCode});
+    reply.code(400);
+    return {message: msg, error: "Bad Request", statusCode: reply.statusCode};
 }
 
 const callInternalServerError = function(reply, msg){
-    reply.code(500).send({message: msg, error: "Internal Server Error", statusCode: reply.statusCode});
+    reply.code(500);
+    return {message: msg, error: "Internal Server Error", statusCode: reply.statusCode};
 }
 
 const callConflict = function(reply, msg){
-    reply.code(409).send({message: msg, error: "Conflict", statusCode: reply.statusCode});
+    reply.code(409);
+    return {message: msg, error: "Conflict", statusCode: reply.statusCode};
 }
 
 const callInsufficientStorage = function(reply, msg){
-    reply.code(507).send({message: msg, error: "Insufficient Storage", statusCode: reply.statusCode});
+    reply.code(507);
+    return {message: msg, error: "Insufficient Storage", statusCode: reply.statusCode};
 }
 
 const callMethodNotAllowed = function(reply, allowedMethods, msg){
-    reply.code(405)
-      .header('Allow', allowedMethods)
-      .send({message: msg, error: "Method Not Allowed", statusCode: reply.statusCode});
+    reply.code(405).header('Allow', allowedMethods);
+    return {message: msg, error: "Method Not Allowed", statusCode: reply.statusCode};
 }
 
 fastify.get('/keys', async (request, reply) => {
-    reply.send(await helper.genKeyPair());
+    return helper.genKeyPair();
 })
 
 fastify.get('/keys/:key', async (request, reply) => {
@@ -60,12 +67,12 @@ fastify.get('/keys/:key', async (request, reply) => {
     try {
       const publicKey = await helper.genPublicKey(key); // Also validates, even if key is public!
       const type = await helper.parseKey(key, { validate: false, part: "type" });
-      reply.send( { type: type, public: publicKey } );
+      return { type: type, public: publicKey };
     } catch (err) {
       if (err.message === 'Invalid Key') {
-        callBadRequest(reply, 'Provided key is invalid');
+        return callBadRequest(reply, 'Provided key is invalid');
       } else {
-        callInternalServerError(reply, err.message);
+        return callInternalServerError(reply, err.message);
       }
     }
 })
@@ -128,23 +135,23 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
         }
 
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: data.webhook});
+            return {message: "Done", error: "Ok", statusCode: reply.statusCode, webhook: data.webhook};
         } else {
-            reply.redirect(redirectOnOk, 303);
+            return reply.redirect(redirectOnOk, 303);
         }
     } catch (err) {
         if (redirectOnErr == null) {
             if (err.message == 'Unauthorized') {
-                callUnauthorized(reply, 'Provided key is not Public');
+                return callUnauthorized(reply, 'Provided key is not Public');
             } else if (err.message === 'Invalid Key') {
-                callBadRequest(reply, 'Provided key is invalid');
+                return callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
-                callBadRequest(reply, 'No data provided in the request body');
+                return callBadRequest(reply, 'No data provided in the request body');
             } else {
-                callInternalServerError(reply, err.message);
+                return callInternalServerError(reply, err.message);
             }
         } else {
-            reply.redirect(redirectOnErr, 303);
+            return reply.redirect(redirectOnErr, 303);
         }
     }
 })
@@ -164,21 +171,21 @@ fastify.get('/private/:privateKey', async (request, reply) => {
         }
 
         if (statsPresent) {
-          reply.send(await helper.privateStats(privateKey));
+          return helper.privateStats(privateKey);
         } else {
           const dataArray = await helper.privateConsume(privateKey);
           if (!dataArray.length) throw new Error('No Data');
-          reply.send(dataArray);
+          return dataArray;
         }
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
-            reply.callNotFound();
+            return reply.callNotFound();
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -194,28 +201,28 @@ fastify.post('/private/:privateKey', async (request, reply) => {
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
 
         if (redirectOnOk == null) {
-            reply.send({
-              message: "Done",
+            return {
+              message: "Published",
               error: "Ok",
               statusCode: reply.statusCode,
               cdn: cdnURL
-            });
+            };
         } else {
-            reply.redirect(redirectOnOk, 303);
+            return reply.redirect(redirectOnOk, 303);
         }
     } catch (err) {
         if (redirectOnErr == null) {
             if (err.message == 'Unauthorized') {
-                callUnauthorized(reply, 'Provided key is not Private');
+                return callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
-                callBadRequest(reply, 'Provided key is invalid');
+                return callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
-                callBadRequest(reply, 'No data provided in the request body');
+                return callBadRequest(reply, 'No data provided in the request body');
             } else {
-                callInternalServerError(reply, err.message);
+                return callInternalServerError(reply, err.message);
             }
         } else {
-            reply.redirect(redirectOnErr, 303);
+            return reply.redirect(redirectOnErr, 303);
         }
     }    
 })
@@ -224,15 +231,22 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
-          if (! await helper.githubPushJSON(privateKey, null, true)) throw new Error('Push to GitHub CDN failed');
+        const cdnURL = await helper.githubPushJSON(privateKey, null, true);
+        if (!cdnURL) throw new Error('Push to GitHub CDN failed');
         reply.code(204);
+        return {
+          message: "Deleted",
+          error: "Ok",
+          statusCode: reply.statusCode,
+          cdn: cdnURL
+        };
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 })
@@ -245,19 +259,19 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
         const cdnURL = await helper.githubPushJSON(privateKey);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
 
-        reply.send({
-          message: "Done",
+        return {
+          message: "Renewed",
           error: "Ok",
           statusCode: reply.statusCode,
           cdn: cdnURL
-        });
+        };
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 })
@@ -273,25 +287,25 @@ fastify.post('/private/:privateKey.kv', async (request, reply) => {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.kvSet(privateKey, request.body, { password, views, fresh });
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+            return {message: "Done", error: "Ok", statusCode: reply.statusCode};
         } else {
-            reply.redirect(redirectOnOk, 303);
+            return reply.redirect(redirectOnOk, 303);
         }
     } catch (err) {
         if (redirectOnErr == null) {
             if (err.message == 'Unauthorized') {
-                callUnauthorized(reply, 'Provided key is not Private');
+                return callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
-                callBadRequest(reply, 'Provided key is invalid');
+                return callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
-                callBadRequest(reply, 'No data provided in the request body');
+                return callBadRequest(reply, 'No data provided in the request body');
             } else if (err.message === 'Insufficient Storage') {
-                callInsufficientStorage(reply, 'Delete existing key(s) before adding new one(s)');
+                return callInsufficientStorage(reply, 'Delete existing key(s) before adding new one(s)');
             } else {
-                callInternalServerError(reply, err.message);
+                return callInternalServerError(reply, err.message);
             }
         } else {
-            reply.redirect(redirectOnErr, 303);
+            return reply.redirect(redirectOnErr, 303);
         }
     }    
 })
@@ -304,19 +318,19 @@ fastify.get('/private/:privateKey.kv', async (request, reply) => {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         if (viewsPresent) {
-          reply.send(await helper.kvViews(privateKey));
+          return helper.kvViews(privateKey);
         } else {
-          reply.send(await helper.kvScan(privateKey));
+          return helper.kvScan(privateKey);
         }
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
-            reply.callNotFound();
+            return reply.callNotFound();
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -331,13 +345,14 @@ fastify.delete('/private/:privateKey.kv/:key?', async (request, reply) => {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.kvDelete(privateKey, ...keys);
         reply.code(204);
+        return '';
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 })
@@ -349,18 +364,18 @@ fastify.patch('/private/:privateKey.kv', async (request, reply) => {
 
         await helper.kvRefresh(privateKey);
         
-        reply.send({
+        return {
           message: "Done",
           error: "Ok",
           statusCode: reply.statusCode
-        });
+        };
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 })
@@ -374,16 +389,16 @@ fastify.get('/public/:publicKey.kv/:key?', async (request, reply) => {
     if (commaSeparatedKeys) keys.push(...commaSeparatedKeys.split(','));
     try {
         if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
-        reply.send(await helper.kvGet(publicKey, password, ...keys));
+        return helper.kvGet(publicKey, password, ...keys);
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Public');
+            return callUnauthorized(reply, 'Provided key is not Public');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
-            reply.callNotFound();
+            return reply.callNotFound();
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -396,27 +411,27 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
-            reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
+            return {message: "Done", error: "Ok", statusCode: reply.statusCode};
         } else {
-            reply.redirect(redirectOnOk, 303);
+            return reply.redirect(redirectOnOk, 303);
         }
     } catch (err) {
         if (redirectOnErr == null) {
             if (err.message == 'Unauthorized') {
-                callUnauthorized(reply, 'Provided key is not Private');
+                return callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
-                callBadRequest(reply, 'Provided key is invalid');
+                return callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
-                callBadRequest(reply, 'No data provided in the request body');
+                return callBadRequest(reply, 'No data provided in the request body');
             } else if (err.message === 'Already Exists') {
-                callConflict(reply, 'Field already exists. GET publicly before POSTing new value');
+                return callConflict(reply, 'Field already exists. GET publicly before POSTing new value');
             } else if (err.message === 'Insufficient Storage') {
-                callInsufficientStorage(reply, 'GET existing field(s) before POSTing new one(s)');
+                return callInsufficientStorage(reply, 'GET existing field(s) before POSTing new one(s)');
             } else {
-                callInternalServerError(reply, err.message);
+                return callInternalServerError(reply, err.message);
             }
         } else {
-            reply.redirect(redirectOnErr, 303);
+            return reply.redirect(redirectOnErr, 303);
         }
     }    
 })
@@ -427,16 +442,16 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
         if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
         const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw new Error('No Data');
-        reply.send(data);
+        return data;
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Public');
+            return callUnauthorized(reply, 'Provided key is not Public');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
-            reply.callNotFound();
+            return reply.callNotFound();
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -448,11 +463,11 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
         return helper.oneToOneTTL(privateKey, key);
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }    
 })
@@ -464,16 +479,16 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         const pipeURL = await helper.pipeToPublic(privateKey, request.method);
         if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
-        reply.redirect(pipeURL, 307);
+        return reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'Method Not Allowed') {
-            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+            return callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 });
@@ -484,26 +499,26 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
         if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
         const pipeURL = await helper.pipeToPrivate(publicKey, request.method);
         if (pipeURL) {
-            reply.redirect(pipeURL, 307);
+            return reply.redirect(pipeURL, 307);
         } else {
             const page404 = await helper.cacheGet(publicKey, 'pipeFail');
             if (page404) {
-                reply.redirect(page404, 303);
+                return reply.redirect(page404, 303);
             } else {
                 throw new Error('No Data');
             }
         }
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            callUnauthorized(reply, 'Provided key is not Private');
+            return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
-            callBadRequest(reply, 'Provided key is invalid');
+            return callBadRequest(reply, 'Provided key is invalid');
         } else if (err.message === 'No Data') {
-            reply.callNotFound();
+            return reply.callNotFound();
         } else if (err.message === 'Method Not Allowed') {
-            callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+            return callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
         } else {
-            callInternalServerError(reply, err.message);
+            return callInternalServerError(reply, err.message);
         }
     }
 });
