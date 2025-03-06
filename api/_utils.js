@@ -100,7 +100,7 @@ function keyType(arg){
 // Parse given key into its distinct parts (Returns JSON object).
 // If required part is provided, returns only that part.
 // Also validates key by default, disable with option {validate: false}.
-export async function parseKey(key, { validate = true } = {}){
+export async function parseKey(key, { validate = true, part } = {}){
   const parsed = {};
   parsed.type = keyType(key[0]);
   parsed.signature = key.substring(1, sigLen + 1);
@@ -108,7 +108,11 @@ export async function parseKey(key, { validate = true } = {}){
   if ( validate && parsed.signature !== await sign(parsed.random + parsed.type) ) {
     throw new Error('Invalid Key');
   }
-  return parsed;
+  if (part) {
+    return parsed[part];
+  } else {
+    return parsed;
+  }
 }
 
 // Also validates key by default, disable with option {validate: false}.
@@ -131,7 +135,7 @@ export async function genKeyPair(){
 
 export async function cacheSet(privateOrPublicKey, obj){
     const publicKey = await genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
     // Promise.all below enables both commands to be executed in a single http request (using same pipeline)
     // As Redis is single-threaded, the commands are executed in order
     // See https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
@@ -146,7 +150,7 @@ export async function cacheSet(privateOrPublicKey, obj){
 // If only a single key is provided, returns the corresponding value as string
 export async function cacheGet(privateOrPublicKey, ...keys){
     const publicKey = await genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
     const [valuesObj, ] = await Promise.all([
       redisRateLimit.hmget(dbKey, ...keys),
       redisRateLimit.expire(dbKey, cacheTtl)
@@ -157,7 +161,7 @@ export async function cacheGet(privateOrPublicKey, ...keys){
 
 export async function cacheDel(privateOrPublicKey, key){
     const publicKey = await genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
     return redisRateLimit.hdel(dbKey, key);
 }
 
@@ -174,7 +178,7 @@ export function decoratePayload(payload, fields={}){
 }
 
 export async function publicProduce(publicKey, data){
-    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey).random;
+    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { part: "random" });
     const [ count, ] = await Promise.all([
       redisData.rpush(dbKey, data),
       redisData.expire(dbKey, ttl)
@@ -184,7 +188,7 @@ export async function publicProduce(publicKey, data){
 
 export async function privateConsume(privateKey){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { validate: false, part: "random" });
     const atomicTransaction = redisData.multi();
     atomicTransaction.lrange(dbKey, 0, -1);
     atomicTransaction.del(dbKey);
@@ -199,7 +203,7 @@ export async function privateConsume(privateKey){
 // N views means after N more views the corresponding key-val will be deleted
 export async function kvSet(privateKey, kvObj, { password, views, fresh=false }={} ){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
 
     // Number coercion. Could also use unary + to turns empty strings into 0
     const viewsCount = Number(views);
@@ -248,7 +252,7 @@ async function cacheKV(dbKey, ...redisHashKeys){
 // Gets all key-vals in kv mode.
 export async function kvScan(privateKey){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
     await cacheKV(dbKey);
     return Object.keys(kvCache)
       .filter((redisHashKey) => redisHashKey.startsWith('key:'))
@@ -264,7 +268,7 @@ export async function kvScan(privateKey){
 // Gets all key-views in kv mode.
 export async function kvViews(privateKey){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
     await cacheKV(dbKey);
     const kvViewsObj = {};
     for (const redisHashKey in kvCache) {
@@ -277,7 +281,7 @@ export async function kvViews(privateKey){
 
 export async function kvDelete(privateKey, ...keys){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
     if (keys.length) {
       const redisHashKeys = [];
       for (const key of keys) redisHashKeys.push('key:' + key, 'views:' + await hash(key));
@@ -289,13 +293,13 @@ export async function kvDelete(privateKey, ...keys){
 
 export async function kvRefresh(privateKey){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
     return redisData.expire(dbKey, ttl);
 }
 
 export async function privateStats(privateKey){
     const publicKey = await genPublicKey(privateKey);
-    const publicKeyRandom = await parseKey(publicKey, { validate: false }).random
+    const publicKeyRandom = await parseKey(publicKey, { validate: false, part: "random" })
     const dbKeyConsume = dbKeyPrefix.manyToOne + publicKeyRandom;
     const dbKeyPublish = dbKeyPrefix.oneToMany + publicKeyRandom;
     const [ countConsume, ttlConsume ] = await Promise.all([
@@ -310,7 +314,7 @@ export async function privateStats(privateKey){
 
 // Demand for data also refreshes its expiry
 export async function kvGet(publicKey, password, ...kvKeys){
-    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey).random;
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { part: "random" });
 
     const redisHashKeys = ['passwd:',];
     const viewsKeyMap = {};
@@ -353,7 +357,7 @@ export async function kvGet(publicKey, password, ...kvKeys){
 
 export async function oneToOneProduce(privateKey, key, data){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
     const field = await hash(key);
 
     // Ideally, fields should be expired using hexpire()
@@ -376,7 +380,7 @@ export async function oneToOneProduce(privateKey, key, data){
 }
 
 export async function oneToOneConsume(publicKey, key){
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey).random;
+    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { part: "random" });
     const field = await hash(key);
     const atomicTransaction = redisData.multi();
     atomicTransaction.hget(dbKey, field);
@@ -387,7 +391,7 @@ export async function oneToOneConsume(publicKey, key){
 
 export async function oneToOneTTL(privateKey, key){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false }).random;
+    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
     const field = await hash(key);
     // Ideally there should be httl() in Upstash's Redis SDK.
     // Until it's available, we use ttl of the containing key as follows.
@@ -436,7 +440,7 @@ function plumbDefunctPipes(tokens, privateMode){
 export async function pipeToPublic(privateKey, httpMethod){
   const publicKey = await genPublicKey(privateKey);
   const privateMode = methodToMode(httpMethod);
-  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey, { validate: false }).random;
+  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey, { validate: false, part: "random" });
   const token = randStr();
   const timeNow = Math.round(Date.now()/1000);
   const [ count, ] = await Promise.all([
@@ -453,7 +457,7 @@ export async function pipeToPublic(privateKey, httpMethod){
 // Expired, unused tokens imply defunct pipes (see above).
 export async function pipeToPrivate(publicKey, httpMethod){
   const privateMode = methodToMode(httpMethod, true);
-  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey).random;
+  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey, { part: "random" });
   const fromDB = await redisData.lpop(dbKey);
   const timeNow = Math.round(Date.now()/1000);
   if (fromDB) {

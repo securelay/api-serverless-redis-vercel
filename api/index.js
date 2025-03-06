@@ -59,7 +59,7 @@ fastify.get('/keys/:key', async (request, reply) => {
     const { key } = request.params;
     try {
       const publicKey = await helper.genPublicKey(key); // Also validates, even if key is public!
-      const type = await helper.parseKey(key, { validate: false }).type;
+      const type = await helper.parseKey(key, { validate: false, part: "type" });
       reply.send( { type: type, public: publicKey } );
     } catch (err) {
       if (err.message === 'Invalid Key') {
@@ -76,7 +76,7 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
     const redirectOnErr = request.query.err;
     let payload = request.body;
     try {
-        if (await helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
 
         const webhook = await helper.cacheGet(publicKey, 'hook'); // Also validates key
 
@@ -155,7 +155,7 @@ fastify.get('/private/:privateKey', async (request, reply) => {
     const statsPresent = 'stats' in request.query;
 
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         if (webhook) {
             waitUntil(helper.cacheSet(privateKey, {hook:webhook}).catch((err) => {}));
@@ -188,7 +188,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         const cdnURL = await helper.githubPushJSON(privateKey, request.body);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
@@ -223,7 +223,7 @@ fastify.post('/private/:privateKey', async (request, reply) => {
 fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
           if (! await helper.githubPushJSON(privateKey, null, true)) throw new Error('Push to GitHub CDN failed');
         reply.code(204);
     } catch (err) {
@@ -240,7 +240,7 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
 fastify.patch('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         const cdnURL = await helper.githubPushJSON(privateKey);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
@@ -270,7 +270,7 @@ fastify.post('/private/:privateKey.kv', async (request, reply) => {
     const password = request.query.password;
     const views = request.query.views;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.kvSet(privateKey, request.body, { password, views, fresh });
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
@@ -301,7 +301,7 @@ fastify.get('/private/:privateKey.kv', async (request, reply) => {
     const viewsPresent = 'views' in request.query;
 
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         if (viewsPresent) {
           reply.send(await helper.kvViews(privateKey));
@@ -328,7 +328,7 @@ fastify.delete('/private/:privateKey.kv/:key?', async (request, reply) => {
     const commaSeparatedKeys = request.query.keys;
     if (commaSeparatedKeys) keys.push(commaSeparatedKeys.split(','));
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.kvDelete(privateKey, ...keys);
         reply.code(204);
     } catch (err) {
@@ -345,7 +345,7 @@ fastify.delete('/private/:privateKey.kv/:key?', async (request, reply) => {
 fastify.patch('/private/:privateKey.kv', async (request, reply) => {
     const { privateKey } = request.params;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
         await helper.kvRefresh(privateKey);
         
@@ -373,7 +373,7 @@ fastify.get('/public/:publicKey.kv/:key?', async (request, reply) => {
     const commaSeparatedKeys = request.query.keys;
     if (commaSeparatedKeys) keys.push(...commaSeparatedKeys.split(','));
     try {
-        if (await helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
         reply.send(await helper.kvGet(publicKey, password, ...keys));
     } catch (err) {
         if (err.message == 'Unauthorized') {
@@ -393,7 +393,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
         if (redirectOnOk == null) {
             reply.send({message: "Done", error: "Ok", statusCode: reply.statusCode});
@@ -424,7 +424,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
 fastify.get('/public/:publicKey/:key', async (request, reply) => {
     const { publicKey, key } = request.params;
     try {
-        if (await helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
         const data = await helper.oneToOneConsume(publicKey, key);
         if (!data) throw new Error('No Data');
         reply.send(data);
@@ -444,7 +444,7 @@ fastify.get('/public/:publicKey/:key', async (request, reply) => {
 fastify.get('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         return helper.oneToOneTTL(privateKey, key);
     } catch (err) {
         if (err.message == 'Unauthorized') {
@@ -461,7 +461,7 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
     const { privateKey } = request.params;
     const pipeFail = request.query.fail;
     try {
-        if (await helper.parseKey(privateKey, { validate: false }).type !== 'private') throw new Error('Unauthorized');
+        if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
         const pipeURL = await helper.pipeToPublic(privateKey, request.method);
         if (pipeFail) waitUntil(helper.cacheSet(privateKey, { pipeFail }));
         reply.redirect(pipeURL, 307);
@@ -481,7 +481,7 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
 fastify.all('/public/:publicKey.pipe', async (request, reply) => {
     const { publicKey } = request.params;
     try {
-        if (await helper.parseKey(publicKey, { validate: false }).type !== 'public') throw new Error('Unauthorized');
+        if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
         const pipeURL = await helper.pipeToPrivate(publicKey, request.method);
         if (pipeURL) {
             reply.redirect(pipeURL, 307);
