@@ -23,6 +23,7 @@ console.log('\nCache: set and get ...')
 await helper.cacheSet(key.private, {fieldA: 'valA', fieldB: 'valB'});
 console.log('Cache multiple values:', JSON.stringify(await helper.cacheGet(key.public, 'fieldA', 'fieldB', 'fieldC')));
 console.log('Cache single value:', await helper.cacheGet(key.public, 'fieldB'));
+console.log('Cache single, unseen field/key:', await helper.cacheGet(key.public, 'fieldY'));
 
 console.log('\nPiping: tokens for private and public must match for complementary modes ...')
 console.log('private POST:', await helper.pipeToPublic(key.private, 'POST'));

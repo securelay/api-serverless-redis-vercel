@@ -151,10 +151,10 @@ export async function cacheSet(privateOrPublicKey, obj){
 export async function cacheGet(privateOrPublicKey, ...keys){
     const publicKey = await genPublicKey(privateOrPublicKey);
     const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
-    const [valuesObj, ] = await Promise.all([
+    const valuesObj = await Promise.all([
       redisRateLimit.hmget(dbKey, ...keys),
       redisRateLimit.expire(dbKey, cacheTtl)
-    ])
+    ]).then(([obj,]) => obj ?? {}) // hmget() returns null if none of the keys is in the redis hash
     if (keys.length === 1) return valuesObj[keys[0]]; // If `keys` has a single key only, return only its value
     return valuesObj;
 }
