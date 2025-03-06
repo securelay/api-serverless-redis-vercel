@@ -472,7 +472,10 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
     }    
 })
 
-fastify.all('/private/:privateKey.pipe', async (request, reply) => {
+// Respond directly from an onRequest hook so that request.body need not be parsed!
+// So, handler is a no-op.
+fastify.all('/private/:privateKey.pipe', {
+    onRequest: async (request, reply) => {
     const { privateKey } = request.params;
     const pipeFail = request.query.fail;
     try {
@@ -482,18 +485,24 @@ fastify.all('/private/:privateKey.pipe', async (request, reply) => {
         return reply.redirect(pipeURL, 307);
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            return callUnauthorized(reply, 'Provided key is not Private');
+            return reply.send(callUnauthorized(reply, 'Provided key is not Private'));
         } else if (err.message === 'Invalid Key') {
-            return callBadRequest(reply, 'Provided key is invalid');
+            return reply.send(callBadRequest(reply, 'Provided key is invalid'));
         } else if (err.message === 'Method Not Allowed') {
-            return callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+            return reply.send(callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping'));
         } else {
-            return callInternalServerError(reply, err.message);
+            return reply.send(callInternalServerError(reply, err.message));
         }
     }
-});
+    }
+  },
+  () => {} // No-op handler
+);
 
-fastify.all('/public/:publicKey.pipe', async (request, reply) => {
+// Respond directly from an onRequest hook so that request.body need not be parsed!
+// So, handler is a no-op.
+fastify.all('/public/:publicKey.pipe', {
+    onRequest: async (request, reply) => {
     const { publicKey } = request.params;
     try {
         if (await helper.parseKey(publicKey, { validate: false, part: "type" }) !== 'public') throw new Error('Unauthorized');
@@ -510,18 +519,21 @@ fastify.all('/public/:publicKey.pipe', async (request, reply) => {
         }
     } catch (err) {
         if (err.message == 'Unauthorized') {
-            return callUnauthorized(reply, 'Provided key is not Private');
+            return reply.send(callUnauthorized(reply, 'Provided key is not Private'));
         } else if (err.message === 'Invalid Key') {
-            return callBadRequest(reply, 'Provided key is invalid');
+            return reply.send(callBadRequest(reply, 'Provided key is invalid'));
         } else if (err.message === 'No Data') {
             return reply.callNotFound();
         } else if (err.message === 'Method Not Allowed') {
-            return callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping');
+            return reply.send(callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping'));
         } else {
-            return callInternalServerError(reply, err.message);
+            return reply.send(callInternalServerError(reply, err.message));
         }
     }
-});
+    }
+  },
+  () => {} // No-op handler
+);
 
 export default async function handler(req, res) {
   await fastify.ready();

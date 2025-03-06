@@ -11,7 +11,7 @@ import { ipAddress } from '@vercel/functions';
 import { next } from '@vercel/edge';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
-import { cdnURL } from './api/_utils.js';
+import { cdnURL, hash, sign } from './api/_utils.js';
 
 // Middleware runs for the following paths only.
 // This avoids unnecessary invocations and ratelimit calls which would otherwise count towards Vercel pricing.
@@ -73,19 +73,6 @@ function errorResponse (statusCode, message) {
   );
 }
 
-// Returns a response from the backend (serverless-function) to the piped request modified to have no body.
-// Prevents Fastify in the backend from parsing the original request.body unnecessarily.
-// May not be needed when Fastify dependency is removed from the backend.
-async function processPipe (request) {
-  // No need to worry with GET/HEAD requests as Fastify at backend won't parse content for these methods
-  if (request.method.match(/(GET|HEAD)/gi)) return next();
-  return fetch(request.url, {
-    method: request.method,
-    headers: { 'x-middleware-auth': middlewareSig },
-    redirect: 'manual'
-  });
-}
-
 // This is the entry point to middleware, the default export that Vercel invokes
 // Performs basic validation and limiting
 // Returns a Response object or Promise that resolves to a Response
@@ -109,9 +96,11 @@ export default async function middleware (request) {
     if (request.headers.get('transfer-encoding')?.toLowerCase()?.includes('chunked')) {
       return errorResponse(400, 'Provide content-length header instead of chunked transfer');
     }
-    if (request.method.toUpperCase() === 'GET') {
-      const [, keyType, key] = new RegExp(config.matcher[1]).exec(requestPath) ?? [];
-      if (keyType === 'public' && key) return Response.redirect(await cdnURL(key), 301)
+    
+    // Redirect to CDN link if path is /public/:key
+    if (request.method.toUpperCase() === 'GET' && requestPath.startsWith('/public/')) {
+      const [ , keyType, key, ...rest ] = requestPath.split('/');
+      if (rest.length === 0 && key) return Response.redirect(await cdnURL(key), 301)
     }
   }
 
@@ -137,28 +126,13 @@ export default async function middleware (request) {
       return errorResponse(400, `Content-Type: '${contentType}', is not allowed`);
   }
 
-  // If one invocation of this middleware modifies the Request and resends,
-  // another invocation of this middleware will intercept it before it reaches the backend.
-  // The following flag tells the latter invocation that it need not re-process the request.
-  const isFromMiddleware = request.headers.get('x-middleware-auth') === middlewareSig;
-
   // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
-  const ratelimitBy = [
-    request.method,
-    requestPath,
-    ipAddress(request)
-  ].join('@');
+  const ratelimitBy = await hash(request.method + requestPath + ipAddress(request));
 
-  // For requests from middleware, no rate-limiting is necessary
-  const { success, reset } = isFromMiddleware ? { success: true, reset: 0 } : await ratelimit.limit(ratelimitBy);
+  const { success, reset } = await ratelimit.limit(ratelimitBy);
 
   if (success) {
-    switch (true) {
-      case isPiped:
-        if (!isFromMiddleware) return processPipe(request);
-      default:
-        return next();
-    }
+    return next();
   } else {
     return errorResponse(429, `Try after ${(reset - Date.now()) / 1000} seconds`);
   }
