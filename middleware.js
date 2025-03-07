@@ -28,17 +28,14 @@ export const config = {
   ]
 }
 
-const middlewareSig = process.env.SECRET; // Secret known to middleware only
 const bodyLimit = parseInt(process.env.BODYLIMIT);
-
-const cache = new Map(); // must be outside of your serverless function handler
 
 const ratelimit = new Ratelimit({
   redis: new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
     token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE
   }),
-  ephemeralCache: cache,
+  ephemeralCache: false,
   analytics: false,
   limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
   prefix: 'rl:',
@@ -59,9 +56,49 @@ const statusCodes = {
   429: 'Too Many Requests'
 };
 
+// Match given URL path to given pattern and extract given parameters.
+// Returns null if no match, so that one can use ?? (nullish) operator with the returned value
+// Returns {parameter: <match>, ...} otherwise.
+// Parameter syntax: Parameters start with : and optional parameters end with ?.
+// Pattern example: /public/:key/:channel?
+// Guarantees non-empty strings as values for non-optional patterns.
+// Note: Doesn't use regexp for performance.
+// See also: https://www.npmjs.com/package/path-to-regexp
+// TODO: Support wildcard/catch-all parameters represented with a trailing *, e.g. :all*
+export function pathMatch (path, pattern) {
+  const arrayFromPattern = pattern.split('/');
+  const arrayFromPath = path.split('/');
+  const patLength = arrayFromPattern.length;
+  // arrayFromPath may be shorter than patLength if optional parameters are present
+  if (arrayFromPath.length > patLength) return null;
+  const obj = {};
+  for (let i = 0; i < patLength; i++) {
+    const patternSlug = arrayFromPattern[i];
+    const pathSlug = arrayFromPath[i];
+    const isParamater = patternSlug.startsWith(':');
+    const isOptional = isParamater && patternSlug.endsWith('?');
+    let paramName;
+    switch (true) {
+      case isOptional:
+        paramName = patternSlug.slice(0,-1);
+        // Fall-through to next case
+      case isParamater:
+        // pathSlug can only be empty string or undefined if corresponding parameter is optional
+        if (!(isOptional || pathSlug)) return null;
+        paramName = (paramName ?? patternSlug).substring(1); // pathName is undefined if isOptional == false
+        obj[paramName] = pathSlug;
+      case patternSlug === pathSlug:
+        break;
+      default:
+        return null;
+    }
+  }
+  return obj;
+}
+
 // Returns Response object with JSON body containing error details for given statusCode
 // message parameter is optional
-function prepResponse (statusCode, message, { cache, redirect, cookies }) {
+function prepResponse (statusCode, message, { cache, redirect, cookies } = {}) {
   const statusText = statusCodes[statusCode];
   const supportedMethods = allowedMethods.join(',');
   return Response.json(
@@ -102,10 +139,10 @@ export default async function middleware (request) {
       return prepResponse(400, 'Provide content-length header instead of chunked transfer');
     }
     
-    // Redirect to CDN link if path is /public/:key
-    if (request.method.toUpperCase() === 'GET' && requestPath.startsWith('/public/')) {
-      const [ , keyType, key, ...rest ] = requestPath.split('/');
-      if (rest.length === 0 && key) return Response.redirect(await cdnURL(key), 301)
+    // Redirect to CDN link if path is /public/:publicKey
+    if (request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD') {
+      const { publicKey } = pathMatch(requestPath, '/public/:publicKey') ?? {};
+      if (publicKey) return Response.redirect(await cdnURL(publicKey), 301)
     }
   }
 
