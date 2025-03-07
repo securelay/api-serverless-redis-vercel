@@ -48,6 +48,11 @@ const ratelimit = new Ratelimit({
 const allowedMethods = ['HEAD', 'GET', 'POST', 'PATCH', 'DELETE'];
 
 const statusCodes = {
+  301: 'Moved Permanently',
+  302: 'Found',
+  303: 'See Other',
+  307: 'Temporary Redirect',
+  308: 'Permanent Redirect',
   400: 'Bad Request',
   405: 'Method Not Allowed',
   417: 'Expectation Failed',
@@ -56,7 +61,7 @@ const statusCodes = {
 
 // Returns Response object with JSON body containing error details for given statusCode
 // message parameter is optional
-function errorResponse (statusCode, message) {
+function prepResponse (statusCode, message, { cache, redirect, cookies }) {
   const statusText = statusCodes[statusCode];
   const supportedMethods = allowedMethods.join(',');
   return Response.json(
@@ -83,7 +88,7 @@ export default async function middleware (request) {
   const requestPath = new URL(request.url).pathname;
 
   // Block requests with Expect headers
-  if (request.headers.has('expect')) return errorResponse(417, 'Expect header is not allowed');
+  if (request.headers.has('expect')) return prepResponse(417, 'Expect header is not allowed');
 
   // Detect a pipe request to let it have any Content-Type and Length, including `Transfer-Encoding: chunked` header
   const isPiped = requestPath.endsWith('.pipe');
@@ -91,10 +96,10 @@ export default async function middleware (request) {
   // Block unallowed methods and chunked transfer if not pipe
   if (!isPiped) {
     if (allowedMethods.includes(request.method.toUpperCase()) === false) {
-      return errorResponse(405, `Method: ${request.method}, is not allowed`);
+      return prepResponse(405, `Method: ${request.method}, is not allowed`);
     }
     if (request.headers.get('transfer-encoding')?.toLowerCase()?.includes('chunked')) {
-      return errorResponse(400, 'Provide content-length header instead of chunked transfer');
+      return prepResponse(400, 'Provide content-length header instead of chunked transfer');
     }
     
     // Redirect to CDN link if path is /public/:key
@@ -118,12 +123,12 @@ export default async function middleware (request) {
     case contentType.includes('text/plain'):
     case contentType.includes('text/html'):
       if (contentLength > bodyLimit) {
-        return errorResponse(400, `Content-Length: ${contentLength}, is not within ${bodyLimit}`);
+        return prepResponse(400, `Content-Length: ${contentLength}, is not within ${bodyLimit}`);
       } else {
         break;
       }
     default:
-      return errorResponse(400, `Content-Type: '${contentType}', is not allowed`);
+      return prepResponse(400, `Content-Type: '${contentType}', is not allowed`);
   }
 
   // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
@@ -134,6 +139,6 @@ export default async function middleware (request) {
   if (success) {
     return next();
   } else {
-    return errorResponse(429, `Try after ${(reset - Date.now()) / 1000} seconds`);
+    return prepResponse(429, `Try after ${(reset - Date.now()) / 1000} seconds`);
   }
 }
