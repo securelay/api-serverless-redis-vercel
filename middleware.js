@@ -96,23 +96,37 @@ export function pathMatch (path, pattern) {
   return obj;
 }
 
-// Returns Response object with JSON body containing error details for given statusCode
-// message parameter is optional
-function prepResponse (statusCode, message, { cache, redirect, cookies } = {}) {
+// Returns a Response object with the given status code.
+// If message is empty string, returns a body-less response.
+// Otherwise, the response contains a JSON body describing details for the given statusCode
+function prepResponse (statusCode, message, { cache = [], redirect = '', cookies = [] } = {}) {
   const statusText = statusCodes[statusCode];
+
   const supportedMethods = allowedMethods.join(',');
-  return Response.json(
-    { message: message ?? statusText, error: statusText, statusCode },
-    {
-      status: statusCode,
-      statusText,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': supportedMethods,
-        Allow: supportedMethods
-      }
-    }
-  );
+  const headers = new Headers({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': supportedMethods,
+    Allow: supportedMethods    
+  });
+  if (redirect) headers.set('Location', redirect);
+  if (cache?.length) cache.forEach((el) => {
+    headers.append('Cache-Control', el);
+  });
+
+  const options = {
+    status: statusCode,
+    statusText,
+    headers
+  }
+
+  if (message === '') {
+    return new Response(null, options);
+  } else {
+    return Response.json(
+      { message: message ?? statusText, error: statusText, statusCode },
+      options
+    );
+  }
 }
 
 // This is the entry point to middleware, the default export that Vercel invokes
@@ -142,7 +156,10 @@ export default async function middleware (request) {
     // Redirect to CDN link if path is /public/:publicKey
     if (request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD') {
       const { publicKey } = pathMatch(requestPath, '/public/:publicKey') ?? {};
-      if (publicKey) return Response.redirect(await cdnURL(publicKey), 301)
+      if (publicKey) return prepResponse(301, '', {
+        redirect: await cdnURL(publicKey),
+        cache: ['public', 'max-age=31536000', 's-maxage=31536000', 'stale-while-validate=86400', 'immutable']
+      });
     }
   }
 
