@@ -48,10 +48,12 @@ const statusCodes = {
   301: 'Moved Permanently',
   302: 'Found',
   303: 'See Other',
+  304: 'Not Modified',
   307: 'Temporary Redirect',
   308: 'Permanent Redirect',
   400: 'Bad Request',
   405: 'Method Not Allowed',
+  412: 'Precondition Failed',
   417: 'Expectation Failed',
   429: 'Too Many Requests'
 };
@@ -99,7 +101,7 @@ export function pathMatch (path, pattern) {
 // Returns a Response object with the given status code.
 // If message is empty string, returns a body-less response.
 // Otherwise, the response contains a JSON body describing details for the given statusCode
-function prepResponse (statusCode, message, { cache = [], redirect = '', cookies = [] } = {}) {
+function prepResponse (statusCode, message, { cache = [], redirect = '', cookies = [], ETag = '' } = {}) {
   const statusText = statusCodes[statusCode];
 
   const supportedMethods = allowedMethods.join(',');
@@ -112,6 +114,7 @@ function prepResponse (statusCode, message, { cache = [], redirect = '', cookies
   if (cache?.length) cache.forEach((el) => {
     headers.append('Cache-Control', el);
   });
+  if (ETag) headers.set('ETag', `"${ETag}"`);
 
   const options = {
     status: statusCode,
@@ -193,6 +196,9 @@ export default async function middleware (request) {
   if (success) {
     return next();
   } else {
-    return prepResponse(429, `Try after ${(reset - Date.now()) / 1000} seconds`);
+    const resetAfter = Math.round((reset - Date.now()) / 1000);
+    return prepResponse(429, `Try after ${resetAfter} seconds`, {
+      cache: ['private', `max-age=${resetAfter}`, 'immutable']
+    });
   }
 }
