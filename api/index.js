@@ -91,12 +91,14 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
 
         const meta =  {};
         const { 
+          origin,
           'x-vercel-ip-country': country,
           'x-vercel-ip-country-region': region,
           'x-vercel-ip-city': city,
           'x-real-ip': ip,
           'content-length': bodySize
         } = request.headers;
+        if (origin) meta.origin = origin;
         if (country || region || city) meta.geolocation = [country, region, city].join('/');
         if (ip) meta.ip = ip;
         if (channel) {

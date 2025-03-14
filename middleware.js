@@ -30,12 +30,13 @@ export const config = {
 
 const bodyLimit = parseInt(process.env.BODYLIMIT);
 
+const cache = new Map(); // must be outside of your serverless function handler
 const ratelimit = new Ratelimit({
   redis: new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
     token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE
   }),
-  ephemeralCache: false,
+  ephemeralCache: cache,
   analytics: false,
   limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
   prefix: 'rl:',
