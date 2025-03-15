@@ -39,6 +39,7 @@ const ratelimit = new Ratelimit({
   prefix: 'rl:',
   ephemeralCache: cache,
   limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
+  timeout: 1000,
   analytics: false,
   enableProtection: false
 });
@@ -192,10 +193,15 @@ export default async function middleware (request) {
   // Ratelimiting by ip is too restrictive: may block users accessing internet from the same router
   const ratelimitBy = await hash(request.method + requestPath + ipAddress(request));
 
-  const { success, reset } = await ratelimit.limit(ratelimitBy);
+  const { success, remaining, reset } = await ratelimit.limit(ratelimitBy);
 
   if (success) {
-    return next();
+    return next({
+      headers: {
+        'x-ratelimit-remaining': remaining,
+        'x-ratelimit-reset': Math.round(reset / 1000)
+      }
+    });
   } else {
     const resetAfter = Math.round((reset - Date.now()) / 1000);
     return prepResponse(429, `Try after ${resetAfter} seconds`, {
