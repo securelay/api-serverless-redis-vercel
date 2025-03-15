@@ -9,7 +9,7 @@ https://github.com/upstash/ratelimit-js/issues/122
 */
 import { ipAddress } from '@vercel/functions';
 import { next } from '@vercel/edge';
-import { Ratelimit } from '@upstash/ratelimit';
+import { Ratelimit } from 'upstash-optimized-ratelimiter'; // '@upstash/ratelimit'
 import { Redis } from '@upstash/redis';
 import { cdnURL, hash, sign } from './api/_utils.js';
 
@@ -36,11 +36,11 @@ const ratelimit = new Ratelimit({
     url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
     token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE
   }),
-  ephemeralCache: cache,
-  analytics: false,
-  limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
   prefix: 'rl:',
-  enableProtection: true
+  ephemeralCache: cache,
+  limiter: Ratelimit.slidingWindow(parseInt(process.env.RATELIMIT), process.env.RATELIMIT_WINDOW + ' s'),
+  analytics: false,
+  enableProtection: false
 });
 
 const allowedMethods = ['HEAD', 'GET', 'POST', 'PATCH', 'DELETE'];
