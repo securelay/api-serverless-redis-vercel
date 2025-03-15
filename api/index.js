@@ -92,6 +92,7 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
         const meta =  {};
         const { 
           origin,
+          referer,
           'x-vercel-ip-country': country,
           'x-vercel-ip-country-region': region,
           'x-vercel-ip-city': city,
@@ -99,6 +100,7 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
           'content-length': bodySize
         } = request.headers;
         if (origin) meta.origin = origin;
+        if (referer) meta.referer = referer;
         if (country || region || city) meta.geolocation = [country, region, city].join('/');
         if (ip) meta.ip = ip;
         if (channel) {
