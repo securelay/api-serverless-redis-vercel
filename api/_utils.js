@@ -54,6 +54,23 @@ const redisRateLimit = new Redis({
 const MyOctokit = Octokit.plugin(createOrUpdateTextFile);
 const octokit = new MyOctokit({ auth: process.env.GITHUB_PAT });
 
+// Run specified script (provided as {hash, script}) with evalsha.
+// If evalsha fails, loads script to redis and reruns evalsha.
+async function safeEval(script, keys, args){
+  try {
+    return await redisData.evalsha(script.hash, keys, args);
+  } catch(err) {
+    if (err.message.includes('NOSCRIPT')) {
+      const sha1 = await redisData.scriptLoad(script.script);
+      if (sha1 !== script.hash) throw new Error(
+        `Expected scipt hash ${script.hash}. Got ${sha1}.`
+      );
+      return redisData.evalsha(script.hash, keys, args); 
+    }
+    throw err;
+  }
+}
+
 export async function hash(str){
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
@@ -189,11 +206,7 @@ export async function publicProduce(publicKey, data){
 export async function privateConsume(privateKey){
     const publicKey = await genPublicKey(privateKey);
     const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { validate: false, part: "random" });
-    const atomicTransaction = redisData.multi();
-    atomicTransaction.lrange(dbKey, 0, -1);
-    atomicTransaction.del(dbKey);
-    return atomicTransaction.exec()
-      .then((values) => values[0]);
+    return redisData.lpop(dbKey, maxPublicPostCount);
 }
 
 // Sets Key-Val pair(s) for the KV mode
@@ -355,51 +368,76 @@ export async function kvGet(publicKey, password, ...kvKeys){
     }
 }
 
-export async function oneToOneProduce(privateKey, key, data){
+export async function oneToOneProduce(privateKey, channel, data, { evict=false, overwrite=false }={}){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
-    const field = await hash(key);
+    const dbKeySortedSet = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
+    const member = await hash([publicKey, channel].join('/'));
+    const dbKeyChannel = dbKeyPrefix.oneToOne + member;
+    const timeNow = Math.round(Date.now()/1000); // Unix-time in seconds
+    
+    const [ added, novel, currFieldCount ] = await Promise.all([
+      // Returns truthy if added
+      redisData.set(dbKeyChannel, data, { nx: !overwrite, ex: ttl }),
+      // Returns number of new members, not including those whose scores merely got reset
+      redisData.zadd(dbKeySortedSet, { nx: !overwrite }, { score: timeNow, member }),
+      redisData.zcard(dbKeySortedSet)
+    ]);
 
-    // Ideally, fields should be expired using hexpire()
-    // However, hexpire() is not in Upstash's Redis SDK yet
-    // Hence, expiring fields in a different way
-    const [ added, ,currFieldCount ] = await Promise.all([
-      redisData.hsetnx(dbKey, field, data),
-      redisData.expire(dbKey, ttl),
-      redisData.hlen(dbKey)
-    ])
+    // The following won't be needed had we used eval or atomicTransaction. But those increase the command count.
+    // If interleaved with non-atomic oneToOneConsume() for the same channel, the following condition might be truthy
+    // Imagine set succeeded by oneToOneConsume() succeeded by zadd
+    // The next set would succeed even if overwrite is not specified
+    // But the subsequent zadd would fail due to nx conflict, if overwrite is not specified
+    // So force zadd to succeed whenever set succeeds, even if overwrite is not specified
+    if (added && !(novel || overwrite)) {
+      await redisData.zadd(dbKeySortedSet, { nx: false }, { score: timeNow, member });
+    }
 
-    // Delete the last added key if storage is full
-    if (currFieldCount >= maxFieldsCount) {
-      if (added) waitUntil(redisData.hdel(dbKey, field));
-      throw new Error('Insufficient Storage');
+    // If storage is full and novelty has been added
+    if (novel && currFieldCount > maxFieldsCount) {
+      const countAfterStaleRemoval = currFieldCount - await redisData.zremrangebyscore(
+        dbKeySortedSet, 0, timeNow - ttl
+      );
+      if (countAfterStaleRemoval <= maxFieldsCount) return;
+      if (evict) {
+        // Delete oldest (LRU) channel
+        const toBeEvictedKeys = await redisData.zpopmin(dbKeySortedSet, countAfterStaleRemoval - maxFieldsCount)
+          .then((arr) => arr.filter((_,i) => i%2 == 0).map((el) => dbKeyPrefix.oneToOne + el));
+        waitUntil(redisData.del(...toBeEvictedKeys));
+      } else {
+        // Delete last added channel
+        waitUntil(oneToOneConsume(publicKey, channel));
+        throw new Error('Insufficient Storage');
+      }
       return;
     }
     
-    if(!added) throw new Error('Already Exists');
+    if(!(added || overwrite)) throw new Error('Already Exists');
 }
 
-export async function oneToOneConsume(publicKey, key){
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { part: "random" });
-    const field = await hash(key);
-    const atomicTransaction = redisData.multi();
-    atomicTransaction.hget(dbKey, field);
-    atomicTransaction.hdel(dbKey, field);
-    return atomicTransaction.exec()
-      .then((values) => values[0]);
+export async function oneToOneConsume(publicKey, channel){
+    const dbKeySortedSet = dbKeyPrefix.oneToOne + await parseKey(publicKey, { part: "random" });
+    const member = await hash([publicKey, channel].join('/'));
+    const dbKeyChannel = dbKeyPrefix.oneToOne + member;
+    
+    // redis lua script
+    const script = {
+      script: `
+        local value = redis.call('GETDEL', KEYS[1])
+        redis.call('ZREM', KEYS[2], ARGV[1])
+        return value
+      `,
+      hash: '6c7f115a4becb9fb6230fee33782bc9439b9a6f7'
+    }
+    
+    return safeEval(script, [dbKeyChannel, dbKeySortedSet], [member]);
 }
 
-export async function oneToOneTTL(privateKey, key){
+export async function oneToOneTTL(privateKey, channel){
     const publicKey = await genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
-    const field = await hash(key);
-    // Ideally there should be httl() in Upstash's Redis SDK.
-    // Until it's available, we use ttl of the containing key as follows.
-    const [ bool, ttl ] = await Promise.all([
-      redisData.hexists(dbKey, field),
-      redisData.ttl(dbKey)
-    ])
-    return {ttl: bool ? ttl : 0};
+    const dbKeyChannel = dbKeyPrefix.oneToOne + await hash([publicKey, channel].join('/'));
+    const _ttl = await redisData.ttl(dbKeyChannel);
+    return (_ttl < 0) ? 0 : _ttl;
 }
 
 // Whether provided http method means 'send' or 'receive' mode.

@@ -411,9 +411,13 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const { privateKey, key } = request.params;
     const redirectOnOk = request.query.ok;
     const redirectOnErr = request.query.err;
+    const evict = 'evict' in request.query;
+    const overwrite = 'overwrite' in request.query;
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
-        await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)));
+        await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)), {
+          evict, overwrite
+        });
         if (redirectOnOk == null) {
             return {message: "Done", error: "Ok", statusCode: reply.statusCode};
         } else {
