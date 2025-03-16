@@ -364,7 +364,7 @@ export async function oneToOneProduce(privateKey, key, data){
     // However, hexpire() is not in Upstash's Redis SDK yet
     // Hence, expiring fields in a different way
     const [ added, ,currFieldCount ] = await Promise.all([
-      redisData.hset(dbKey, {[field]: data}),
+      redisData.hsetnx(dbKey, field, data),
       redisData.expire(dbKey, ttl),
       redisData.hlen(dbKey)
     ])
