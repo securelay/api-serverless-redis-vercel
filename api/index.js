@@ -135,7 +135,7 @@ fastify.post('/public/:publicKey/:channel?', async (request, reply) => {
             data.webhook = false;
             await helper.publicProduce(publicKey, data);
             if (webhook) waitUntil(helper.cacheDel(publicKey, 'hook').catch((err) => {}));
-            if (app) waitUntil(helper.OneSignalSendPush(app, publicKey, data).catch((err) => {}));
+            if (app) waitUntil(helper.OneSignalSendPush(app, origin, publicKey, data).catch((err) => {}));
         }
 
         if (redirectOnOk == null) {

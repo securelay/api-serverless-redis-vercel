@@ -522,14 +522,15 @@ export function OneSignalKey(app){
 
 // Web-push data using OneSignal and registered app details.
 // Parameter `data` must be valid JSON object, but not an array!
-export async function OneSignalSendPush(app, externalID, data=null){
+export async function OneSignalSendPush(app, origin, externalID, data=null){
   const OneSignalAPIKey = OneSignalKey(app);
   const OneSignalAppID = OneSignalID(app);
   const appObj = await fetch(`https://securelay.github.io/apps/${app.toLowerCase()}.json`)
     .then((response) => response.json())
     .catch((err) => undefined);
-  if(!appObj.webPush.data) delete data.data; // Delete private data from payload for security
   if (! (OneSignalAPIKey && OneSignalAppID && appObj)) throw new Error('App is not recognized');
+  if (appObj.origin && appObj.origin !== origin) return; // Return silently in case of origin mismatch
+  if (!appObj.webPush.data) delete data.data; // Delete private data from payload for security
   return fetch('https://api.onesignal.com/notifications?c=push', {
     method: 'POST',
     headers: {
