@@ -14,7 +14,7 @@ const fastify = Fastify({
 fastify.addHook('onRequest', (request, reply, done) => {
     reply.headers({
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'HEAD,GET,POST,PATCH,DELETE',
+        'Access-Control-Allow-Methods': 'HEAD, GET, POST, PATCH, DELETE',
         'Content-Disposition': 'inline'
     })
     done();
@@ -31,6 +31,19 @@ const callUnauthorized = function(reply, msg){
 const callForbidden = function(reply, msg){
     reply.code(403);
     return {message: msg, error: "Forbidden", statusCode: reply.statusCode};
+}
+
+const callBlacklisted = function(reply, msg){
+    const warning = 'YOU HAVE BEEN BLACKLISTED. DONOT USE THIS KEY AGAIN';
+    reply.code(403);
+    reply.header('Cache-Control', [
+      'public',
+      'max-age=31536000',
+      's-maxage=31536000',
+      'stale-while-validate=86400', 
+      'immutable'
+    ].join(', '));
+    return {message: msg ?? warning, error: "Forbidden", statusCode: reply.statusCode};
 }
 
 const callBadRequest = function(reply, msg){
@@ -186,6 +199,8 @@ fastify.get('/private/:privateKey', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else if (err.message === 'No Data') {
             return reply.callNotFound();
         } else {
@@ -220,6 +235,8 @@ fastify.post('/private/:privateKey', async (request, reply) => {
                 return callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
                 return callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'Blacklisted') {
+                return callBlacklisted(reply);
             } else if (err.message === 'No Payload') {
                 return callBadRequest(reply, 'No data provided in the request body');
             } else {
@@ -249,6 +266,8 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else {
             return callInternalServerError(reply, err.message);
         }
@@ -274,6 +293,8 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else {
             return callInternalServerError(reply, err.message);
         }
@@ -301,6 +322,8 @@ fastify.post('/private/:privateKey.kv', async (request, reply) => {
                 return callUnauthorized(reply, 'Provided key is not Private');
             } else if (err.message === 'Invalid Key') {
                 return callBadRequest(reply, 'Provided key is invalid');
+            } else if (err.message === 'Blacklisted') {
+                return callBlacklisted(reply);
             } else if (err.message === 'No Payload') {
                 return callBadRequest(reply, 'No data provided in the request body');
             } else if (err.message === 'Insufficient Storage') {
@@ -331,6 +354,8 @@ fastify.get('/private/:privateKey.kv', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else if (err.message === 'No Data') {
             return reply.callNotFound();
         } else {
@@ -355,6 +380,8 @@ fastify.delete('/private/:privateKey.kv/:key?', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else {
             return callInternalServerError(reply, err.message);
         }
@@ -378,6 +405,8 @@ fastify.patch('/private/:privateKey.kv', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else {
             return callInternalServerError(reply, err.message);
         }
@@ -431,6 +460,8 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
                 return callBadRequest(reply, 'Provided key is invalid');
             } else if (err.message === 'No Payload') {
                 return callBadRequest(reply, 'No data provided in the request body');
+            } else if (err.message === 'Blacklisted') {
+                return callBlacklisted(reply);
             } else if (err.message === 'Already Exists') {
                 return callConflict(reply, 'Field already exists. GET publicly before POSTing new value');
             } else if (err.message === 'Insufficient Storage') {
@@ -474,6 +505,8 @@ fastify.get('/private/:privateKey/:key', async (request, reply) => {
             return callUnauthorized(reply, 'Provided key is not Private');
         } else if (err.message === 'Invalid Key') {
             return callBadRequest(reply, 'Provided key is invalid');
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else {
             return callInternalServerError(reply, err.message);
         }
@@ -496,6 +529,8 @@ fastify.all('/private/:privateKey.pipe', {
             return reply.send(callUnauthorized(reply, 'Provided key is not Private'));
         } else if (err.message === 'Invalid Key') {
             return reply.send(callBadRequest(reply, 'Provided key is invalid'));
+        } else if (err.message === 'Blacklisted') {
+            return callBlacklisted(reply);
         } else if (err.message === 'Method Not Allowed') {
             return reply.send(callMethodNotAllowed(reply, 'GET,POST,PUT', 'Provided method is not allowed for piping'));
         } else {

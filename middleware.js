@@ -106,7 +106,7 @@ export function pathMatch (path, pattern) {
 function prepResponse (statusCode, message, { cache = [], redirect = '', cookies = [], ETag = '' } = {}) {
   const statusText = statusCodes[statusCode];
 
-  const supportedMethods = allowedMethods.join(',');
+  const supportedMethods = allowedMethods.join(', ');
   const headers = new Headers({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': supportedMethods,

@@ -132,6 +132,17 @@ export async function parseKey(key, { validate = true, part } = {}){
   }
 }
 
+// Check if given public key is blacklisted
+// If blacklisted, `PUBLICKEY.json` would exist in https://github.com/securelay/blacklist
+export async function isBlacklisted(publicKey){
+  const url = `https://raw.githubusercontent.com/securelay/blacklist/main/${publicKey}.json`;
+  return fetch(url, {
+    method: 'HEAD',
+    signal: AbortSignal.timeout(1000) // Timeout request after 1000 ms
+  }).then((response) => response.ok)
+    .catch((err) => false); // Assume whitelisted if query times out or throws other errors
+}
+
 // Also validates key by default, disable with option {validate: false}.
 export async function genPublicKey(privateOrPublicKey, { validate = true } = {}){
     const { type, random, signature } = await parseKey(privateOrPublicKey, { validate: validate });
@@ -140,7 +151,9 @@ export async function genPublicKey(privateOrPublicKey, { validate = true } = {})
     // For valid keys, if any, that can't generate a public key, the following check is needed.
     if (type !== 'private') return undefined;
     const publicRandom = await hash(random); // Hash private-key's random to get public-key's random
-    return keyType('public') + await sign(publicRandom + 'public') + publicRandom;
+    const publicKey = keyType('public') + await sign(publicRandom + 'public') + publicRandom;
+    if (validate && await isBlacklisted(publicKey)) throw new Error('Blacklisted');
+    return publicKey;
 }
 
 export async function genKeyPair(){
