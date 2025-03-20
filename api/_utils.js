@@ -3,12 +3,13 @@ Refs:
 https://upstash.com/docs/redis/sdks/ts/pipelining/pipeline-transaction
 https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 */
-import { hash as cryptoHash, createHmac, getRandomValues } from 'node:crypto';
-import { Buffer } from "node:buffer";
+import { fromUint8Array as base64encode } from 'js-base64';
 import { Redis } from '@upstash/redis';
 import { Octokit } from '@octokit/core';
 import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
 import { waitUntil } from '@vercel/functions';
+
+const kvCache = {};
 
 const secret = process.env.SECRET;
 const sigLen = parseInt(process.env.SIG_LEN);
@@ -25,7 +26,7 @@ const defunctPipePlumbTimeout = parseInt(process.env.DEFUNCT_PIPE_PLUMB_TIMEOUT)
 
 const dbKeyPrefix = {
                 manyToOne: "m2o:",
-                oneToMany: "o2m:",
+                oneToMany: "kv:",
                 oneToOne: "o2o:",
                 cache: "cache:",
                 pipe: {
@@ -53,26 +54,47 @@ const redisRateLimit = new Redis({
 const MyOctokit = Octokit.plugin(createOrUpdateTextFile);
 const octokit = new MyOctokit({ auth: process.env.GITHUB_PAT });
 
-function hash(str){
-    return cryptoHash('md5', str, 'base64url').substring(0,hashLen);
-    // For small size str crypto.hash() is faster than crypto.createHash()
-    // Ref: https://nodejs.org/api/crypto.html#cryptohashalgorithm-data-outputencoding
+// Run specified script (provided as {hash, script}) with evalsha.
+// If evalsha fails, loads script to redis and reruns evalsha.
+async function safeEval(script, keys, args){
+  try {
+    return await redisData.evalsha(script.hash, keys, args);
+  } catch(err) {
+    if (err.message.includes('NOSCRIPT')) {
+      const sha1 = await redisData.scriptLoad(script.script);
+      if (sha1 !== script.hash) throw new Error(
+        `Expected scipt hash ${script.hash}. Got ${sha1}.`
+      );
+      return redisData.evalsha(script.hash, keys, args); 
+    }
+    throw err;
+  }
 }
 
-function sign(str){
-    // Ref: https://nodejs.org/api/crypto.html#using-strings-as-inputs-to-cryptographic-apis
-    return createHmac('md5', secret).update(str).digest('base64url').substring(0,sigLen);
+export async function hash(str){
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    return crypto.subtle.digest('SHA-256', data)
+      .then((buffer) => base64encode(new Uint8Array(buffer), true).substring(0,hashLen));
+}
+
+export async function sign(str){
+    const encoder = new TextEncoder();
+    const algorithm = { name: "HMAC", hash: "SHA-256" };
+    const key = await crypto.subtle.importKey('raw', encoder.encode(secret), algorithm, false, ["sign", "verify"]);
+    return crypto.subtle.sign(algorithm.name, key, encoder.encode(str))
+      .then((buffer) => base64encode(new Uint8Array(buffer), true).substring(0,sigLen));
 }
 
 // Brief: Return random base64url string of given length
-function randStr(len = hashLen){
+export function randStr(len = hashLen){
   const byteSize = Math.ceil(len*6/8); // base64 char is 6 bit, byte is 8
-  const buff = Buffer.alloc(byteSize);
-  getRandomValues(buff);
-  return buff.toString('base64url').substring(0,len);
+  const arr = new Uint8Array(byteSize);
+  crypto.getRandomValues(arr);
+  return base64encode(arr, true).substring(0,len);
 }
 
-export function id(){
+export async function id(){
     return sign('id');
 }
 
@@ -95,38 +117,55 @@ function keyType(arg){
 // Parse given key into its distinct parts (Returns JSON object).
 // If required part is provided, returns only that part.
 // Also validates key by default, disable with option {validate: false}.
-export function parseKey(key, { validate = true } = {}){
+export async function parseKey(key, { validate = true, part } = {}){
   const parsed = {};
   parsed.type = keyType(key[0]);
   parsed.signature = key.substring(1, sigLen + 1);
   parsed.random = key.substring(sigLen + 1);
-  if ( validate && parsed.signature !== sign(parsed.random + parsed.type) ) {
+  if ( validate && parsed.signature !== await sign(parsed.random + parsed.type) ) {
     throw new Error('Invalid Key');
   }
-  return parsed;
+  if (part) {
+    return parsed[part];
+  } else {
+    return parsed;
+  }
+}
+
+// Check if given public key is blacklisted
+// If blacklisted, `PUBLICKEY.json` would exist in https://github.com/securelay/blacklist
+export async function isBlacklisted(publicKey){
+  const url = `https://raw.githubusercontent.com/securelay/blacklist/main/${publicKey}.json`;
+  return fetch(url, {
+    method: 'HEAD',
+    signal: AbortSignal.timeout(1000) // Timeout request after 1000 ms
+  }).then((response) => response.ok)
+    .catch((err) => false); // Assume whitelisted if query times out or throws other errors
 }
 
 // Also validates key by default, disable with option {validate: false}.
-export function genPublicKey(privateOrPublicKey, { validate = true } = {}){
-    const { type, random, signature } = parseKey(privateOrPublicKey, { validate: validate });
+export async function genPublicKey(privateOrPublicKey, { validate = true } = {}){
+    const { type, random, signature } = await parseKey(privateOrPublicKey, { validate: validate });
     if (type === 'public') return privateOrPublicKey;
     // In future, there may be more key types other than private and public.
     // For valid keys, if any, that can't generate a public key, the following check is needed.
     if (type !== 'private') return undefined;
-    const publicRandom = hash(random); // Hash private-key's random to get public-key's random
-    return keyType('public') + sign(publicRandom + 'public') + publicRandom;
+    const publicRandom = await hash(random); // Hash private-key's random to get public-key's random
+    const publicKey = keyType('public') + await sign(publicRandom + 'public') + publicRandom;
+    if (validate && await isBlacklisted(publicKey)) throw new Error('Blacklisted');
+    return publicKey;
 }
 
-export function genKeyPair(){
+export async function genKeyPair(){
     const privateRandom = randStr(hashLen);
-    const privateKey = keyType('private') + sign(privateRandom + 'private') + privateRandom;
-    const publicKey = genPublicKey(privateKey, { validate: false });
+    const privateKey = keyType('private') + await sign(privateRandom + 'private') + privateRandom;
+    const publicKey = await genPublicKey(privateKey, { validate: false });
     return {private: privateKey, public: publicKey};
 }
 
 export async function cacheSet(privateOrPublicKey, obj){
-    const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
+    const publicKey = await genPublicKey(privateOrPublicKey);
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
     // Promise.all below enables both commands to be executed in a single http request (using same pipeline)
     // As Redis is single-threaded, the commands are executed in order
     // See https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
@@ -140,19 +179,19 @@ export async function cacheSet(privateOrPublicKey, obj){
 // If multiple keys are provided comma-separated as key1, key2, ..., returns json obj: {key1: val1, key2: val2, ...}
 // If only a single key is provided, returns the corresponding value as string
 export async function cacheGet(privateOrPublicKey, ...keys){
-    const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
-    const [valuesObj, ] = await Promise.all([
+    const publicKey = await genPublicKey(privateOrPublicKey);
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
+    const valuesObj = await Promise.all([
       redisRateLimit.hmget(dbKey, ...keys),
       redisRateLimit.expire(dbKey, cacheTtl)
-    ])
+    ]).then(([obj,]) => obj ?? {}) // hmget() returns null if none of the keys is in the redis hash
     if (keys.length === 1) return valuesObj[keys[0]]; // If `keys` has a single key only, return only its value
     return valuesObj;
 }
 
 export async function cacheDel(privateOrPublicKey, key){
-    const publicKey = genPublicKey(privateOrPublicKey);
-    const dbKey = dbKeyPrefix.cache + parseKey(publicKey, { validate: false }).random;
+    const publicKey = await genPublicKey(privateOrPublicKey);
+    const dbKey = dbKeyPrefix.cache + await parseKey(publicKey, { validate: false, part: "random" });
     return redisRateLimit.hdel(dbKey, key);
 }
 
@@ -162,28 +201,14 @@ export async function cacheDel(privateOrPublicKey, key){
 //  time: Unix-time in seconds
 // Other metadata may be provided as the optional `fields` JSON object
 // Properties in `fields` override the autogenerated properties
-// `passwd`, if provided, is hashed and stored as metadata property `__lock__`.
-export function decoratePayload(payload, fields={}, passwd=null){
+export function decoratePayload(payload, fields={}){
   if (Object.keys(payload).length === 0) throw new Error('No Payload');
   const generatedMeta = {id: randStr(), time: Math.round(Date.now()/1000)};
-  const lockMeta = {};
-  // Check if passwd is not null or undefined.
-  // Note: check passes even if passwd is empty string as '' can be hashed.
-  if (passwd != null) lockMeta['__lock__'] = hash(passwd);
-  return {...generatedMeta, ...fields, ...lockMeta, data: payload};
-}
-
-// Removes `__lock__` property from json object after matching its value against provided `passwd`.
-export function unlockJSON(json, passwd){
-  if (! '__lock__' in json) return json;
-  if (json['__lock__'] === hash(passwd)) {
-    delete(json['__lock__']);
-    return json;
-  }
+  return {...generatedMeta, ...fields, data: payload};
 }
 
 export async function publicProduce(publicKey, data){
-    const dbKey = dbKeyPrefix.manyToOne + parseKey(publicKey).random;
+    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { part: "random" });
     const [ count, ] = await Promise.all([
       redisData.rpush(dbKey, data),
       redisData.expire(dbKey, ttl)
@@ -192,36 +217,115 @@ export async function publicProduce(publicKey, data){
 }
 
 export async function privateConsume(privateKey){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.manyToOne + parseKey(publicKey, { validate: false }).random;
-    const atomicTransaction = redisData.multi();
-    atomicTransaction.lrange(dbKey, 0, -1);
-    atomicTransaction.del(dbKey);
-    return atomicTransaction.exec()
-      .then((values) => values[0]);
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.manyToOne + await parseKey(publicKey, { validate: false, part: "random" });
+    return redisData.lpop(dbKey, maxPublicPostCount);
 }
 
-export async function privateProduce(privateKey, data){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
-    return redisData.set(dbKey, data, { ex: ttl });
+// Sets Key-Val pair(s) for the KV mode
+// Keys are stored in a Redis hash as is with prefix 'key:'
+// Corresponding views are stored as hash(key) with prefix 'views:'
+// Password, if provided, is stored against key: 'passwd:'
+// N views means after N more views the corresponding key-val will be deleted
+export async function kvSet(privateKey, kvObj, { password, views, fresh=false }={} ){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
+
+    // Number coercion. Could also use unary + to turns empty strings into 0
+    const viewsCount = Number(views);
+
+    // Prepare hash to be stored in Redis
+    const redisHash = {};
+    for (const key in kvObj) {
+        redisHash['key:'+key] = kvObj[key];
+        if (!Number.isNaN(viewsCount)) redisHash['views:'+await hash(key)] = -viewsCount;
+    }
+
+    if (password) redisHash['passwd:'] = await hash(password);
+
+    let existingKeys;
+    if (fresh) {
+      redisData.del(dbKey);
+      existingKeys = [];
+    } else {
+      existingKeys = await redisData.hkeys(dbKey);
+    }
+    const stagedKeys = Object.keys(redisHash);
+    if (new Set(existingKeys.concat(stagedKeys)).size > maxFieldsCount) throw new Error('Insufficient Storage');
+
+    return Promise.all([
+      redisData.hset(dbKey, redisHash),
+      redisData.expire(dbKey, ttl)
+    ]);
 }
 
-export async function privateDelete(privateKey){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
-    return redisData.del(dbKey);
+// Caches all or selected key-vals in `kvCache` for use by others.
+// So, pulling the key-vals from the DB can be done once only.
+// Accessing data refreshes expiry.
+// Note: Optionally, provide redis-hash-keys instead of user's keys from kv
+async function cacheKV(dbKey, ...redisHashKeys){
+  if (Object.keys(kvCache).length) return; // Dont proceed if already cached
+  redisData.expire(dbKey, ttl); // Puts command in auto-pipeline
+  if (redisHashKeys.length) {
+    // Pull provided keys only, to save bandwidth
+    Object.assign(kvCache, await redisData.hmget(dbKey, ...redisHashKeys));
+  } else {
+    // Pull all keys
+    Object.assign(kvCache, await redisData.hgetall(dbKey));
+  }
 }
 
-export async function privateRefresh(privateKey){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey, { validate: false }).random;
+// Gets all key-vals in kv mode.
+export async function kvScan(privateKey){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
+    await cacheKV(dbKey);
+    return Object.keys(kvCache)
+      .filter((redisHashKey) => redisHashKey.startsWith('key:'))
+      .reduce((obj, redisHashKey) => {
+          const key = redisHashKey.substring(4); // Substring to remove the prefix 'key:'
+          obj[key] = kvCache[redisHashKey];
+          return obj;
+        },
+        {}
+      )
+}
+
+// Gets all key-views in kv mode.
+export async function kvViews(privateKey){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
+    await cacheKV(dbKey);
+    const kvViewsObj = {};
+    for (const redisHashKey in kvCache) {
+      if (!redisHashKey.startsWith('key:')) continue;
+      const key = redisHashKey.substring(4); // Substring to remove the prefix 'key:'
+      kvViewsObj[key] = kvCache['views:' + await hash(key)];
+    }
+    return kvViewsObj;
+}
+
+export async function kvDelete(privateKey, ...keys){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
+    if (keys.length) {
+      const redisHashKeys = [];
+      for (const key of keys) redisHashKeys.push('key:' + key, 'views:' + await hash(key));
+      return redisData.hdel(dbKey, ...redisHashKeys);
+    } else {
+      return redisData.del(dbKey);
+    }
+}
+
+export async function kvRefresh(privateKey){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { validate: false, part: "random" });
     return redisData.expire(dbKey, ttl);
 }
 
 export async function privateStats(privateKey){
-    const publicKey = genPublicKey(privateKey);
-    const publicKeyRandom = parseKey(publicKey, { validate: false }).random
+    const publicKey = await genPublicKey(privateKey);
+    const publicKeyRandom = await parseKey(publicKey, { validate: false, part: "random" })
     const dbKeyConsume = dbKeyPrefix.manyToOne + publicKeyRandom;
     const dbKeyPublish = dbKeyPrefix.oneToMany + publicKeyRandom;
     const [ countConsume, ttlConsume ] = await Promise.all([
@@ -235,49 +339,118 @@ export async function privateStats(privateKey){
 }
 
 // Demand for data also refreshes its expiry
-export async function publicConsume(publicKey){
-    const dbKey = dbKeyPrefix.oneToMany + parseKey(publicKey).random;
-    return redisData.getex(dbKey, { ex: ttl });
+export async function kvGet(publicKey, password, ...kvKeys){
+    const dbKey = dbKeyPrefix.oneToMany + await parseKey(publicKey, { part: "random" });
+
+    const redisHashKeys = ['passwd:',];
+    const viewsKeyMap = {};
+    for (const key of kvKeys) {
+      redisHashKeys.push('key:'+key);
+      viewsKeyMap[key] = 'views:'+await hash(key);
+    }
+    redisHashKeys.push(...Object.values(viewsKeyMap));
+
+    await cacheKV(dbKey, ...redisHashKeys);
+
+    const kvObj = {};
+    const delHashKeys = [];
+    const incrHashCtrs = {};
+
+    if (kvCache['passwd:'] == null || kvCache['passwd:'] === await hash(password)) {
+      kvKeys.forEach((key) => {
+        const val = kvCache['key:'+key];
+        if (val == null) return;
+        kvObj[key] = val;
+        const count = kvCache[viewsKeyMap[key]];
+        if (count == -1) {
+          delHashKeys.push('key:'+key, viewsKeyMap[key]);
+        } else {
+          incrHashCtrs[viewsKeyMap[key]] = count+1;
+        }
+      })
+      if (Object.keys(incrHashCtrs).length) waitUntil(redisData.hset(dbKey, incrHashCtrs));
+      if (delHashKeys.length) waitUntil(redisData.hdel(dbKey, ...delHashKeys));
+    } else {
+      throw new Error('Unauthorized');
+    }
+    
+    if (kvKeys.length > 1) {
+      return kvObj;
+    } else {
+      return kvObj[kvKeys[0]];
+    }
 }
 
-export async function oneToOneProduce(privateKey, key, data){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
-    const field = hash(key);
-    const [ fieldExists, currFieldCount ] = await Promise.all([
-      redisData.hexists(dbKey, field),
-      redisData.hlen(dbKey)
-    ])
-    if ((!fieldExists) && (currFieldCount >= maxFieldsCount)) throw new Error('Insufficient Storage');
-    // Ideally there should be hexpire() in Upstash's Redis SDK.
-    // Until it's available, we expire the containing key as follows.
-    return Promise.all([
-      redisData.hset(dbKey, {[field]: data}),
-      redisData.expire(dbKey, ttl)
-    ])
+export async function oneToOneProduce(privateKey, channel, data, { evict=false, overwrite=false }={}){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKeySortedSet = dbKeyPrefix.oneToOne + await parseKey(publicKey, { validate: false, part: "random" });
+    const member = await hash([publicKey, channel].join('/'));
+    const dbKeyChannel = dbKeyPrefix.oneToOne + member;
+    const timeNow = Math.round(Date.now()/1000); // Unix-time in seconds
+    
+    const [ added, novel, currFieldCount ] = await Promise.all([
+      // Returns truthy if added
+      redisData.set(dbKeyChannel, data, { nx: !overwrite, ex: ttl }),
+      // Returns number of new members, not including those whose scores merely got reset
+      redisData.zadd(dbKeySortedSet, { nx: !overwrite }, { score: timeNow, member }),
+      redisData.zcard(dbKeySortedSet)
+    ]);
+
+    // The following won't be needed had we used eval or atomicTransaction. But those increase the command count.
+    // If interleaved with non-atomic oneToOneConsume() for the same channel, the following condition might be truthy
+    // Imagine set succeeded by oneToOneConsume() succeeded by zadd
+    // The next set would succeed even if overwrite is not specified
+    // But the subsequent zadd would fail due to nx conflict, if overwrite is not specified
+    // So force zadd to succeed whenever set succeeds, even if overwrite is not specified
+    if (added && !(novel || overwrite)) {
+      await redisData.zadd(dbKeySortedSet, { nx: false }, { score: timeNow, member });
+    }
+
+    // If storage is full and novelty has been added
+    if (novel && currFieldCount > maxFieldsCount) {
+      const countAfterStaleRemoval = currFieldCount - await redisData.zremrangebyscore(
+        dbKeySortedSet, 0, timeNow - ttl
+      );
+      if (countAfterStaleRemoval <= maxFieldsCount) return;
+      if (evict) {
+        // Delete oldest (LRU) channel
+        const toBeEvictedKeys = await redisData.zpopmin(dbKeySortedSet, countAfterStaleRemoval - maxFieldsCount)
+          .then((arr) => arr.filter((_,i) => i%2 == 0).map((el) => dbKeyPrefix.oneToOne + el));
+        waitUntil(redisData.del(...toBeEvictedKeys));
+      } else {
+        // Delete last added channel
+        waitUntil(oneToOneConsume(publicKey, channel));
+        throw new Error('Insufficient Storage');
+      }
+      return;
+    }
+    
+    if(!(added || overwrite)) throw new Error('Already Exists');
 }
 
-export async function oneToOneConsume(publicKey, key){
-    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey).random;
-    const field = hash(key);
-    const atomicTransaction = redisData.multi();
-    atomicTransaction.hget(dbKey, field);
-    atomicTransaction.hdel(dbKey, field);
-    return atomicTransaction.exec()
-      .then((values) => values[0]);
+export async function oneToOneConsume(publicKey, channel){
+    const dbKeySortedSet = dbKeyPrefix.oneToOne + await parseKey(publicKey, { part: "random" });
+    const member = await hash([publicKey, channel].join('/'));
+    const dbKeyChannel = dbKeyPrefix.oneToOne + member;
+    
+    // redis lua script
+    const script = {
+      script: `
+        local value = redis.call('GETDEL', KEYS[1])
+        redis.call('ZREM', KEYS[2], ARGV[1])
+        return value
+      `,
+      hash: '6c7f115a4becb9fb6230fee33782bc9439b9a6f7'
+    }
+    
+    return safeEval(script, [dbKeyChannel, dbKeySortedSet], [member]);
 }
 
-export async function oneToOneTTL(privateKey, key){
-    const publicKey = genPublicKey(privateKey);
-    const dbKey = dbKeyPrefix.oneToOne + parseKey(publicKey, { validate: false }).random;
-    const field = hash(key);
-    // Ideally there should be httl() in Upstash's Redis SDK.
-    // Until it's available, we use ttl of the containing key as follows.
-    const [ bool, ttl ] = await Promise.all([
-      redisData.hexists(dbKey, field),
-      redisData.ttl(dbKey)
-    ])
-    return {ttl: bool ? ttl : 0};
+export async function oneToOneTTL(privateKey, channel){
+    const publicKey = await genPublicKey(privateKey);
+    const dbKeyChannel = dbKeyPrefix.oneToOne + await hash([publicKey, channel].join('/'));
+    const _ttl = await redisData.ttl(dbKeyChannel);
+    return (_ttl < 0) ? 0 : _ttl;
 }
 
 // Whether provided http method means 'send' or 'receive' mode.
@@ -316,9 +489,9 @@ function plumbDefunctPipes(tokens, privateMode){
 // Defunct pipes are plumbed later with bodyless pipes: see plumbDefunctPipes().
 // Timestamps (Unix-time in seconds) are stored with the tokens using string concatenation.
 export async function pipeToPublic(privateKey, httpMethod){
-  const publicKey = genPublicKey(privateKey);
+  const publicKey = await genPublicKey(privateKey);
   const privateMode = methodToMode(httpMethod);
-  const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey, { validate: false }).random;
+  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey, { validate: false, part: "random" });
   const token = randStr();
   const timeNow = Math.round(Date.now()/1000);
   const [ count, ] = await Promise.all([
@@ -335,7 +508,7 @@ export async function pipeToPublic(privateKey, httpMethod){
 // Expired, unused tokens imply defunct pipes (see above).
 export async function pipeToPrivate(publicKey, httpMethod){
   const privateMode = methodToMode(httpMethod, true);
-  const dbKey = dbKeyPrefix.pipe[privateMode] + parseKey(publicKey).random;
+  const dbKey = dbKeyPrefix.pipe[privateMode] + await parseKey(publicKey, { part: "random" });
   const fromDB = await redisData.lpop(dbKey);
   const timeNow = Math.round(Date.now()/1000);
   if (fromDB) {
@@ -362,14 +535,15 @@ export function OneSignalKey(app){
 
 // Web-push data using OneSignal and registered app details.
 // Parameter `data` must be valid JSON object, but not an array!
-export async function OneSignalSendPush(app, externalID, data=null){
+export async function OneSignalSendPush(app, origin, externalID, data=null){
   const OneSignalAPIKey = OneSignalKey(app);
   const OneSignalAppID = OneSignalID(app);
   const appObj = await fetch(`https://securelay.github.io/apps/${app.toLowerCase()}.json`)
     .then((response) => response.json())
     .catch((err) => undefined);
-  if(!appObj.webPush.data) delete data.data; // Delete private data from payload for security
   if (! (OneSignalAPIKey && OneSignalAppID && appObj)) throw new Error('App is not recognized');
+  if (appObj.origin && appObj.origin !== origin) return; // Return silently in case of origin mismatch
+  if (!appObj.webPush.data) delete data.data; // Delete private data from payload for security
   return fetch('https://api.onesignal.com/notifications?c=push', {
     method: 'POST',
     headers: {
@@ -390,15 +564,24 @@ export async function OneSignalSendPush(app, externalID, data=null){
   }).then((res) => res.json())
 }
 
+// Derive CDN URL from public key
+export async function cdnURL(publicKey){
+  const base = 'https://cdn.jsdelivr.net/gh';
+  return `${base}/${process.env.GITHUB_OWNER_REPO}@main/` + await id() + `/${publicKey}.json`;
+  // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${endpointID}`;
+  // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
+}
+
 // Push JSON (object) to be stored at https://securelay.github.io/jsonbin/{id}/{publicKey}.json
 // The function adds metadata using decoratePayload() above.
 // Do not pass JSON in order to touch existing data (i.e. update its timestamp).
 // Pass null as `json` and true as `remove` for removing the stored data.
-// Returns true if data is updated or deleted, false otherwise.
+// Returns link to the data, if data is updated or deleted, false otherwise.
 // Ref: https://github.com/octokit/plugin-create-or-update-text-file.js/
 export async function githubPushJSON(privateKey, json=null, remove=false){
-  const publicKey = genPublicKey(privateKey);
-  const path = id() + '/' + publicKey + '.json';
+  const publicKey = await genPublicKey(privateKey);
+  const jsonURL = await cdnURL(publicKey);
+  const path = await id() + '/' + publicKey + '.json';
   const touch = Boolean(!(json || remove));
   const timeNow = Math.round(Date.now()/1000); // Unix-time in seconds
   let content, mode;
@@ -407,7 +590,7 @@ export async function githubPushJSON(privateKey, json=null, remove=false){
     // Do not commit to GitHub if re-touching within a day. Because CDN_TTL >> 1 day.
     // Avoiding GitHub traffic reduces blocking time, thus helping performance.
     const lastTouched = await cacheGet(publicKey, 'cdnRenewed');
-    if (lastTouched && ((timeNow - lastTouched) < 86400)) return true;
+    if (lastTouched && ((timeNow - lastTouched) < 86400)) return jsonURL;
     // Just update timestamp in metadata when `touch` is true;
     mode = 'touched';
     
@@ -429,19 +612,22 @@ export async function githubPushJSON(privateKey, json=null, remove=false){
     content = JSON.stringify(decoratePayload(json));
   }
   
+  const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
   const { updated, deleted } = await octokit.createOrUpdateTextFile({
-    owner: "securelay",
-    repo: "jsonbin",
-    path: path,
-    content: content,
+    owner,
+    repo,
+    path,
+    content,
     message: mode + ' ' + path,
   });
 
   if (mode === 'deleted') {
     await cacheDel(privateKey, 'cdnRenewed');
-    return deleted;
+    if (deleted) return jsonURL;
   } else {
     await cacheSet(privateKey, { cdnRenewed: timeNow });
-    return updated && !deleted; // updated and deleted both being truthy means expiry
+    // updated and deleted both being truthy means expiry
+    if (updated && !deleted) return jsonURL;
   }
+  return false; // Reaching this step means everything failed above
 }

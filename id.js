@@ -5,4 +5,4 @@ Run: node --env-file=.env id.js
 
 import { id } from './api/_utils.js';
 
-console.log(id());
+console.log(await id());
