@@ -542,8 +542,13 @@ export async function OneSignalSendPush(app, origin, externalID, data=null){
     .then((response) => response.json())
     .catch((err) => undefined);
   if (! (OneSignalAPIKey && OneSignalAppID && appObj)) throw new Error('App is not recognized');
-  if (appObj.origin && appObj.origin !== origin) return; // Return silently in case of origin mismatch
-  if (!appObj.webPush.data) delete data.data; // Delete private data from payload for security
+
+  // Return silently in case of origin mismatch
+  const registeredOrigins = appObj.webPush.ifOrigin;
+  if (registeredOrigins && registeredOrigins.includes(origin) == false) return;
+
+  if (!appObj.webPush.sendData) delete data.data; // Delete private data from payload for security
+
   return fetch('https://api.onesignal.com/notifications?c=push', {
     method: 'POST',
     headers: {
