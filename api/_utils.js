@@ -32,7 +32,8 @@ const dbKeyPrefix = {
                 pipe: {
                   send: "pipeSend:",
                   receive: "pipeRecv:"
-                }
+                },
+                cdn: "cdn:"
             }
 
 // Redis client for user database
@@ -575,6 +576,49 @@ export async function cdnURL(publicKey){
   return `${base}/${process.env.GITHUB_OWNER_REPO}@main/` + await id() + `/${publicKey}.json`;
   // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${endpointID}`;
   // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
+}
+
+export async function queueForGitHubStore(privateKey, json=null, remove=false){
+  const publicKey = await genPublicKey(privateKey);
+  const jsonURL = await cdnURL(publicKey);
+
+  let action;
+  if (json && remove) {
+    action = 'add';
+  } else if (json && !remove) {
+    const exists = await fetch(jsonURL, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(1000)
+    })
+    .then((res) => res.ok)
+    .catch((err) => false);
+    if (exists) {
+      return;
+    } else {
+      action = 'add';
+    }
+  } else if (remove) {
+    action = 'delete';
+  } else {
+    action = 'renew';
+  }
+
+  const dbKey = dbKeyPrefix.cdn;
+  const cdnData = {publicKey, action, json, ttl: cdnTtl};
+  const count = await redisData.rpush(dbKey, cdnData);
+  if (count === 1) {
+    const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
+    await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
+      owner,
+      repo,
+      issue_number: 1,
+      labels: ['pull'],
+      headers: {
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    })
+  }
+  return jsonURL;
 }
 
 // Push JSON (object) to be stored at https://securelay.github.io/jsonbin/{id}/{publicKey}.json
