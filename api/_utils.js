@@ -6,7 +6,6 @@ https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 import { fromUint8Array as base64encode } from 'js-base64';
 import { Redis } from '@upstash/redis';
 import { Octokit } from '@octokit/core';
-import { createOrUpdateTextFile } from '@octokit/plugin-create-or-update-text-file';
 import { waitUntil } from '@vercel/functions';
 
 const kvCache = {};
@@ -54,8 +53,7 @@ const redisRateLimit = new Redis({
 })
 
 // Setup Octokit for accessing the GitHub API
-const MyOctokit = Octokit.plugin(createOrUpdateTextFile);
-const octokit = new MyOctokit({ auth: process.env.GITHUB_PAT });
+const octokit = new Octokit({ auth: process.env.GITHUB_PAT });
 
 // Run specified script (provided as {hash, script}) with evalsha.
 // If evalsha fails, loads script to redis and reruns evalsha.
@@ -572,6 +570,7 @@ export async function OneSignalSendPush(app, origin, externalID, data=null){
   }).then((res) => res.json())
 }
 
+// Ref: https://github.com/securelay/jsonbin. See the documentation there.
 // Derive CDN URL from public key
 export async function cdnURL(publicKey){
   const base = 'https://cdn.jsdelivr.net/gh';
@@ -580,6 +579,10 @@ export async function cdnURL(publicKey){
   // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${path}`;
 }
 
+// Ref: https://github.com/securelay/jsonbin. See the documentation there.
+// Parameter `json` passes json data as the object, not its json string.
+// `json` being truthy and `remove` being falsy mean, "add file only if non-existent".
+// To add file regardless of prior existence, use `remove` = true.
 export async function queueForGitHubStore(privateKey, json=null, remove=false){
   const publicKey = await genPublicKey(privateKey);
   const jsonURL = await cdnURL(publicKey);
@@ -608,6 +611,11 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
   const dbKey = dbKeyPrefix.cdn;
   const cdnData = { uuid: publicKey, action, json, ttl: cdnTtl };
   const count = await redisData.rpush(dbKey, cdnData);
+
+  // If queue was empty prior to above `rpush`, trigger 'pull.yml' action/workflow at
+  // https://github.com/securelay/jsonbin
+  // 'pull.yml' confirms queue isn't empty, by checking label 'pull' exists on issue #1 of that repo
+  // 'pull.yml' removes the label before pulling from queue, until empty
   if (count === 1) {
     const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
     waitUntil(
@@ -634,64 +642,4 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
     );
   }
   return jsonURL;
-}
-
-// Push JSON (object) to be stored at https://securelay.github.io/jsonbin/{id}/{publicKey}.json
-// The function adds metadata using decoratePayload() above.
-// Do not pass JSON in order to touch existing data (i.e. update its timestamp).
-// Pass null as `json` and true as `remove` for removing the stored data.
-// Returns link to the data, if data is updated or deleted, false otherwise.
-// Ref: https://github.com/octokit/plugin-create-or-update-text-file.js/
-export async function githubPushJSON(privateKey, json=null, remove=false){
-  const publicKey = await genPublicKey(privateKey);
-  const jsonURL = await cdnURL(publicKey);
-  const path = await id() + '/' + publicKey + '.json';
-  const touch = Boolean(!(json || remove));
-  const timeNow = Math.round(Date.now()/1000); // Unix-time in seconds
-  let content, mode;
-  
-  if (touch) {
-    // Do not commit to GitHub if re-touching within a day. Because CDN_TTL >> 1 day.
-    // Avoiding GitHub traffic reduces blocking time, thus helping performance.
-    const lastTouched = await cacheGet(publicKey, 'cdnRenewed');
-    if (lastTouched && ((timeNow - lastTouched) < 86400)) return jsonURL;
-    // Just update timestamp in metadata when `touch` is true;
-    mode = 'touched';
-    
-    // Do nothing if file doesn't exist
-    // Else, delete file if expired
-    // Otherwise, just update the timestamp in the file
-    content = ({exists, content}) => {
-      if (!exists) return null;
-      const json = JSON.parse(content);
-      if ((timeNow - json.time) > cdnTtl) return null;
-      json.time = timeNow;
-      return JSON.stringify(json);
-    }
-  } else if (json === null) {
-    mode = 'deleted';
-    content = null;
-  } else {
-    mode = 'updated';
-    content = JSON.stringify(decoratePayload(json));
-  }
-  
-  const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
-  const { updated, deleted } = await octokit.createOrUpdateTextFile({
-    owner,
-    repo,
-    path,
-    content,
-    message: mode + ' ' + path,
-  });
-
-  if (mode === 'deleted') {
-    await cacheDel(privateKey, 'cdnRenewed');
-    if (deleted) return jsonURL;
-  } else {
-    await cacheSet(privateKey, { cdnRenewed: timeNow });
-    // updated and deleted both being truthy means expiry
-    if (updated && !deleted) return jsonURL;
-  }
-  return false; // Reaching this step means everything failed above
 }
