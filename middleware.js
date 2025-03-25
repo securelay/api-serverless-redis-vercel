@@ -34,7 +34,10 @@ const cache = new Map(); // must be outside of your serverless function handler
 const ratelimit = new Ratelimit({
   redis: new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE
+    token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE,
+    latencyLogging: false,
+    enableAutoPipelining: true,
+    automaticDeserialization: true // So that we get object instead of JSON string
   }),
   prefix: 'rl:',
   ephemeralCache: cache,

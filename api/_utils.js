@@ -41,14 +41,16 @@ const redisData = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL_MAIN,
   token: process.env.UPSTASH_REDIS_REST_TOKEN_MAIN,
   latencyLogging: false,
-  enableAutoPipelining: true
+  enableAutoPipelining: true,
+  automaticDeserialization: true // So that we get object instead of JSON string
 })
 // Redis client for ratelimiter database
 const redisRateLimit = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
   token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE,
   latencyLogging: false,
-  enableAutoPipelining: true
+  enableAutoPipelining: true,
+  automaticDeserialization: true // So that we get object instead of JSON string
 })
 
 // Setup Octokit for accessing the GitHub API
@@ -573,9 +575,9 @@ export async function OneSignalSendPush(app, origin, externalID, data=null){
 // Derive CDN URL from public key
 export async function cdnURL(publicKey){
   const base = 'https://cdn.jsdelivr.net/gh';
-  return `${base}/${process.env.GITHUB_OWNER_REPO}@main/` + await id() + `/${publicKey}.json`;
-  // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${endpointID}`;
-  // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${endpointID}`;
+  return `${base}/${process.env.GITHUB_OWNER_REPO}@latest/silo/${publicKey}.json`;
+  // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${path}`;
+  // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${path}`;
 }
 
 export async function queueForGitHubStore(privateKey, json=null, remove=false){
@@ -604,19 +606,32 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
   }
 
   const dbKey = dbKeyPrefix.cdn;
-  const cdnData = {publicKey, action, json, ttl: cdnTtl};
+  const cdnData = { uuid: publicKey, action, json, ttl: cdnTtl };
   const count = await redisData.rpush(dbKey, cdnData);
   if (count === 1) {
     const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
-    await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
-      owner,
-      repo,
-      issue_number: 1,
-      labels: ['pull'],
-      headers: {
-        'X-GitHub-Api-Version': '2022-11-28'
-      }
-    })
+    waitUntil(
+      octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
+        owner,
+        repo,
+        issue_number: 1,
+        labels: ['pull'],
+        headers: {
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
+      }).catch((err) => {})
+    );
+    waitUntil(
+      octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
+        owner,
+        repo,
+        workflow_id: 'pull.yml',
+        ref: 'workflow',
+        headers: {
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
+      }).catch((err) => {})
+    );
   }
   return jsonURL;
 }
