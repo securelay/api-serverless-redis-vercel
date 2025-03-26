@@ -34,7 +34,10 @@ const cache = new Map(); // must be outside of your serverless function handler
 const ratelimit = new Ratelimit({
   redis: new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL_CACHE,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE
+    token: process.env.UPSTASH_REDIS_REST_TOKEN_CACHE,
+    latencyLogging: false,
+    enableAutoPipelining: true,
+    automaticDeserialization: true // So that we get object instead of JSON string
   }),
   prefix: 'rl:',
   ephemeralCache: cache,
@@ -161,10 +164,13 @@ export default async function middleware (request) {
     // Redirect to CDN link if path is /public/:publicKey
     if (request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD') {
       const { publicKey } = pathMatch(requestPath, '/public/:publicKey') ?? {};
-      if (publicKey) return prepResponse(301, '', {
-        redirect: await cdnURL(publicKey),
-        cache: ['public', 'max-age=31536000', 's-maxage=31536000', 'stale-while-validate=86400', 'immutable']
-      });
+      if (publicKey) {
+        const latest = request.headers.get('cache-control')?.includes('no-cache');
+        return prepResponse(301, '', {
+          redirect: await cdnURL(publicKey, latest),
+          cache: ['public', 'max-age=31536000', 'stale-while-validate=86400', 'immutable']
+        });
+      }
     }
   }
 

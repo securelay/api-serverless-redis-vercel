@@ -216,12 +216,12 @@ fastify.post('/private/:privateKey', async (request, reply) => {
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
-        const cdnURL = await helper.githubPushJSON(privateKey, request.body);
+        const cdnURL = await helper.queueForGitHubStore(privateKey, request.body, true);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
 
         if (redirectOnOk == null) {
             return {
-              message: "Published",
+              message: "Queued for publishing",
               error: "Ok",
               statusCode: reply.statusCode,
               cdn: cdnURL
@@ -252,11 +252,11 @@ fastify.delete('/private/:privateKey', async (request, reply) => {
     const { privateKey } = request.params;
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
-        const cdnURL = await helper.githubPushJSON(privateKey, null, true);
+        const cdnURL = await helper.queueForGitHubStore(privateKey, null, true);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
         reply.code(204);
         return {
-          message: "Deleted",
+          message: "Queued for deletion",
           error: "Ok",
           statusCode: reply.statusCode,
           cdn: cdnURL
@@ -279,11 +279,11 @@ fastify.patch('/private/:privateKey', async (request, reply) => {
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
 
-        const cdnURL = await helper.githubPushJSON(privateKey);
+        const cdnURL = await helper.queueForGitHubStore(privateKey);
         if (!cdnURL) throw new Error('Push to GitHub CDN failed');
 
         return {
-          message: "Renewed",
+          message: "Queued for renewal",
           error: "Ok",
           statusCode: reply.statusCode,
           cdn: cdnURL
