@@ -164,10 +164,13 @@ export default async function middleware (request) {
     // Redirect to CDN link if path is /public/:publicKey
     if (request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD') {
       const { publicKey } = pathMatch(requestPath, '/public/:publicKey') ?? {};
-      if (publicKey) return prepResponse(301, '', {
-        redirect: await cdnURL(publicKey),
-        cache: ['public', 'max-age=31536000', 's-maxage=31536000', 'stale-while-validate=86400', 'immutable']
-      });
+      if (publicKey) {
+        const latest = request.headers.get('cache-control')?.includes('no-cache');
+        return prepResponse(301, '', {
+          redirect: await cdnURL(publicKey, latest),
+          cache: ['public', 'max-age=31536000', 'stale-while-validate=86400', 'immutable']
+        });
+      }
     }
   }
 

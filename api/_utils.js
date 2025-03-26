@@ -5,7 +5,7 @@ https://upstash.com/docs/redis/sdks/ts/pipelining/auto-pipeline
 */
 import { fromUint8Array as base64encode } from 'js-base64';
 import { Redis } from '@upstash/redis';
-import { Octokit } from '@octokit/core';
+import { request } from '@octokit/request'; // More lightweight than '@octokit/core'
 import { waitUntil } from '@vercel/functions';
 
 const kvCache = {};
@@ -53,7 +53,16 @@ const redisRateLimit = new Redis({
 })
 
 // Setup Octokit for accessing the GitHub API
-const octokit = new Octokit({ auth: process.env.GITHUB_PAT });
+const [ ownerGH, repoGH, refGH ] = process.env.GITHUB_OWNER_REPO_REF.split('/');
+const requestGitHub = request.defaults({
+  owner: ownerGH,
+  repo: repoGH,
+  headers: {
+    'user-agent': 'securelay',
+    authorization: `Bearer ${process.env.GITHUB_PAT}`,
+    'X-GitHub-Api-Version': '2022-11-28'
+  }
+});
 
 // Run specified script (provided as {hash, script}) with evalsha.
 // If evalsha fails, loads script to redis and reruns evalsha.
@@ -571,14 +580,20 @@ export async function OneSignalSendPush(app, origin, externalID, data=null){
 }
 
 // Ref: https://github.com/securelay/jsonbin. See the documentation there.
-// Derive CDN URL from public key
-export async function cdnURL(uuid){
+// Derive CDN URL from given unique string, `uuid`. This can be a publicKey for example.
+// Provide parameter `latest` as truthy if returned URL should show the latest version.
+export async function cdnURL(uuid, latest=false){
+  let version;
+  if (latest) {
+    // Get last commit SHA as version
+    version = await requestGitHub('GET /repos/{owner}/{repo}/commits', {
+      per_page: 1
+    }).then(({ data: singleElementArrayOfObj }) => {
+      return singleElementArrayOfObj[0].sha;
+    }).catch((err) => {});
+  }
   const base = 'https://cdn.jsdelivr.net/gh';
-  const [ owner, repo, ref ] = process.env.GITHUB_OWNER_REPO_REF.split('/');
-  return `${base}/${owner}/${repo}@${ref}/silo/${uuid}.json`;
-  // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${path}`;
-  // Alternately: `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
-  // Alternately: `https://cdn.statically.io/gh/${owner}/${repo}/${ref}/${path}`;
+  return `${base}/${ownerGH}/${repoGH}@${version ?? refGH}/silo/${uuid}.json`;
 }
 
 // Ref: https://github.com/securelay/jsonbin. See the documentation there.
@@ -619,27 +634,16 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
   // 'pull.yml' confirms queue isn't empty, by checking label 'pull' exists on issue #1 of that repo
   // 'pull.yml' removes the label before pulling from queue, until empty
   if (count === 1) {
-    const [ owner, repo, ref ] = process.env.GITHUB_OWNER_REPO_REF.split('/');
     waitUntil(
-      octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
-        owner,
-        repo,
+      requestGitHub('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
         issue_number: 1,
-        labels: ['pull'],
-        headers: {
-          'X-GitHub-Api-Version': '2022-11-28'
-        }
+        labels: ['pull']
       }).catch((err) => {})
     );
     waitUntil(
-      octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
-        owner,
-        repo,
+      requestGitHub('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
         workflow_id: 'pull.yml',
-        ref,
-        headers: {
-          'X-GitHub-Api-Version': '2022-11-28'
-        }
+        ref: refGH
       }).catch((err) => {})
     );
   }
