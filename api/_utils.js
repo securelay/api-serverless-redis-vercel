@@ -572,11 +572,13 @@ export async function OneSignalSendPush(app, origin, externalID, data=null){
 
 // Ref: https://github.com/securelay/jsonbin. See the documentation there.
 // Derive CDN URL from public key
-export async function cdnURL(publicKey){
+export async function cdnURL(uuid){
   const base = 'https://cdn.jsdelivr.net/gh';
-  return `${base}/${process.env.GITHUB_OWNER_REPO}@latest/silo/${publicKey}.json`;
+  const [ owner, repo, ref ] = process.env.GITHUB_OWNER_REPO_REF.split('/');
+  return `${base}/${owner}/${repo}@${ref}/silo/${uuid}.json`;
   // Alternately, if published as GitHub pages: `https://securelay.github.io/jsonbin/${path}`;
-  // Alternately: `https://raw.githubusercontent.com/securelay/jsonbin/main/${path}`;
+  // Alternately: `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
+  // Alternately: `https://cdn.statically.io/gh/${owner}/${repo}/${ref}/${path}`;
 }
 
 // Ref: https://github.com/securelay/jsonbin. See the documentation there.
@@ -617,7 +619,7 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
   // 'pull.yml' confirms queue isn't empty, by checking label 'pull' exists on issue #1 of that repo
   // 'pull.yml' removes the label before pulling from queue, until empty
   if (count === 1) {
-    const [ owner, repo ] = process.env.GITHUB_OWNER_REPO.split('/');
+    const [ owner, repo, ref ] = process.env.GITHUB_OWNER_REPO_REF.split('/');
     waitUntil(
       octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', {
         owner,
@@ -634,7 +636,7 @@ export async function queueForGitHubStore(privateKey, json=null, remove=false){
         owner,
         repo,
         workflow_id: 'pull.yml',
-        ref: 'workflow',
+        ref,
         headers: {
           'X-GitHub-Api-Version': '2022-11-28'
         }
