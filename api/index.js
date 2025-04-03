@@ -11,11 +11,13 @@ const fastify = Fastify({
 })
 
 // Enable CORS. This implementation is lightweight than importing '@fastify/cors'
+// Disable MIME sniffing
 fastify.addHook('onRequest', (request, reply, done) => {
     reply.headers({
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'HEAD, GET, POST, PATCH, DELETE',
-        'Content-Disposition': 'inline'
+        'Content-Disposition': 'inline',
+        'X-Content-Type-Options': 'nosniff'
     })
     done();
 })
@@ -444,7 +446,7 @@ fastify.post('/private/:privateKey/:key', async (request, reply) => {
     const overwrite = 'overwrite' in request.query;
     try {
         if (await helper.parseKey(privateKey, { validate: false, part: "type" }) !== 'private') throw new Error('Unauthorized');
-        await helper.oneToOneProduce(privateKey, key, JSON.stringify(helper.decoratePayload(request.body)), {
+        await helper.oneToOneProduce(privateKey, key, request.body, {
           evict, overwrite
         });
         if (redirectOnOk == null) {
